@@ -7,6 +7,14 @@
     "path": "skills/example-skill",
     "version": "0.1.0",
     "tags": ["example", "template"]
+  },
+  {
+    "id": "wechat-miniapp-dev",
+    "name": "WeChat Miniapp Dev",
+    "description": "Guides one-stop WeChat Mini Program creation, iteration, documentation, checks, and release preparation.",
+    "repo": "moux1024/moux-skills",
+    "path": "skills/wechat-miniapp-dev",
+    "version": "0.1.0",
+    "tags": ["wechat", "miniapp", "development"]
   }
 ]
-
