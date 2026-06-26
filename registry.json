@@ -1,0 +1,12 @@
+[
+  {
+    "id": "example-skill",
+    "name": "Example Skill",
+    "description": "Demonstrates the repository structure for GitHub-installed skills.",
+    "repo": "moux1024/moux-skills",
+    "path": "skills/example-skill",
+    "version": "0.1.0",
+    "tags": ["example", "template"]
+  }
+]
+
