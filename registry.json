@@ -14,7 +14,7 @@
     "description": "Guides one-stop WeChat Mini Program creation, iteration, documentation, checks, and release preparation.",
     "repo": "moux1024/moux-skills",
     "path": "skills/wechat-miniapp-dev",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "tags": ["wechat", "miniapp", "development"]
   }
 ]

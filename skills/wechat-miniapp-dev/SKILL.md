@@ -1,7 +1,7 @@
 ---
 name: wechat-miniapp-dev
 description: WeChat Mini Program development workflow for non-professional users. Use when the user wants to create, initialize, scaffold, iterate, check, document, upload, review, or release a WeChat Mini Program project.
-version: 0.1.0
+version: 0.1.1
 ---
 
 # WeChat Miniapp Dev
@@ -13,6 +13,8 @@ Help non-professional users create and iterate WeChat Mini Program projects with
 Guide with natural-language questions. Ask only for information required by the current task, continue locally when safe, and request explicit confirmation before any risky external action.
 
 Assume the user may not understand Git, AppID, WeChat Cloud Development, backend APIs, build commands, remote repository authorization, or Mini Program review requirements.
+
+Treat Tencent's official WeChat Mini Program documentation as the source of truth for framework behavior, APIs, components, configuration, privacy, review, and release requirements. Do not rely on third-party tutorials when official docs cover the topic. When the task touches unfamiliar or version-sensitive Mini Program behavior, read `references/official-docs.md` and route to the linked official page before designing or changing code.
 
 ## Project Files
 
@@ -38,19 +40,21 @@ Create advanced workflow, CI/CD, release, or YAML requirement files only when th
    Completion criterion: known project facts are captured without inventing AppID, cloud, repository, or secret values. When creating project docs from scratch, read `references/templates.md`.
 3. Ask the minimum natural-language questions needed for the current task.
    Completion criterion: every unanswered item is either blocking, warning, or optional under the current task.
-4. Infer likely WeChat capabilities from the user request.
+4. Check official WeChat documentation when the task depends on platform behavior, configuration, components, APIs, privacy, upload, review, or release rules.
+   Completion criterion: official references consulted are recorded in `current-plan.md` under assumptions, risks, or implementation notes. Read `references/official-docs.md` for the documentation map.
+5. Infer likely WeChat capabilities from the user request.
    Completion criterion: inferred capabilities are written to `current-plan.md`; persist them to `profile.yaml` only after user confirmation. For capability details, read `references/capability-matrix.md`.
-5. Classify missing information.
+6. Classify missing information.
    Completion criterion: blocking items stop the task, warning items proceed only after confirmation, and optional items do not block. For the policy, read `references/required-info-policy.md`.
-6. Write `docs/ai/miniapp/current-plan.md` and archive a copy under `docs/ai/miniapp/plans/`.
+7. Write `docs/ai/miniapp/current-plan.md` and archive a copy under `docs/ai/miniapp/plans/`.
    Completion criterion: the plan records scope, assumptions, missing information, inferred capabilities, risks, checks, and explicit confirmations.
-7. Implement scoped code or documentation changes.
+8. Implement scoped code or documentation changes.
    Completion criterion: changes stay inside the resolved target project and match its framework.
-8. Update `api.md` and `data-model.md` whenever APIs, cloud functions, collections, database fields, permissions, or self-hosted backend contracts change.
+9. Update `api.md` and `data-model.md` whenever APIs, cloud functions, collections, database fields, permissions, or self-hosted backend contracts change.
    Completion criterion: docs describe the current interface and data shape affected by the task.
-9. Run available checks.
+10. Run available checks.
    Completion criterion: local structure, JSON/config sanity, package scripts, syntax checks, and relevant consistency checks have run where available; skipped checks have reasons.
-10. End with changed files, checks run, skipped checks, risks, and next manual actions.
+11. End with changed files, checks run, skipped checks, risks, official docs consulted, and next manual actions.
     Completion criterion: the user can tell what changed and what still requires WeChat platform or credential access.
 
 ## New Projects
