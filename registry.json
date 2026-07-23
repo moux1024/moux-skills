@@ -16,5 +16,14 @@
     "path": "skills/wechat-miniapp-dev",
     "version": "0.1.1",
     "tags": ["wechat", "miniapp", "development"]
+  },
+  {
+    "id": "a-share-core-stock-analysis",
+    "name": "A-Share Core Stock Analysis",
+    "description": "Analyzes institutional behavior of Chinese A-share core holdings using relative strength, ETF flow, sector rotation, chip distribution, and national-team logic instead of literal main-capital flow.",
+    "repo": "moux1024/moux-skills",
+    "path": "skills/a-share-core-stock-analysis",
+    "version": "0.1.0",
+    "tags": ["stock", "china", "institution", "hs300", "investment"]
   }
 ]

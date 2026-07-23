@@ -1,0 +1,4 @@
+interface:
+  display_name: "A-Share Core Stock Analysis"
+  short_description: "Analyze institutional behavior in A-share core holdings."
+  default_prompt: "Analyze institutional behavior for this A-share core holding using relative strength, ETF flow, sector rotation, chips, and national team mode."
