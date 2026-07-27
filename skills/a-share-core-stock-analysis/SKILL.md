@@ -31,16 +31,32 @@ Apply the framework to HS300/SSE50 heavyweights, large state-owned banks, centra
 
 Use this evidence hierarchy:
 
-1. Market environment and index leadership
-2. Relative strength versus CSI300
-3. Sector rotation versus industry index
-4. ETF and passive capital flow
-5. Chip distribution over 20 to 60 trading days
-6. Volume structure
-7. Main capital flow as supporting evidence only
-8. K-line structure and trend confirmation
+1. Market regime
+2. Index leadership
+3. ETF and passive capital flow
+4. Relative strength versus CSI300
+5. Relative strength versus industry index
+6. Chip distribution over 20 to 60 trading days
+7. Institution cost zone
+8. Volume structure
+9. Main capital flow as supporting evidence only
+10. K-line structure and trend confirmation
 
 Never make the primary conclusion from main-capital inflow/outflow, a single large-volume day, or one-day price movement.
+
+Use this mandatory analysis path:
+
+```text
+Market Regime
+  -> Index Leadership
+  -> ETF Flow
+  -> Relative Strength versus CSI300
+  -> Relative Strength versus Industry
+  -> Chip Distribution
+  -> Institution Cost Zone
+  -> Volume Structure
+  -> Main Capital Flow
+```
 
 ## National Team Mode
 
@@ -55,15 +71,35 @@ When national team mode is active:
 
 ## Workflow
 
-### 1. Market Environment
+### 1. Market Regime
 
 Classify the overall market as `Risk On`, `Risk Off`, or `Sideways`.
 
+Evaluate CSI300, SSE50, ChiNext, market breadth, turnover, and risk appetite.
+
+Never analyze the stock independently from the market regime.
+
+### 2. Index Leadership
+
+Determine who is pulling the index.
+
 Evaluate CSI300, SSE50, ChiNext, and the relevant sector index such as financials, banks, consumption, new energy, telecom, energy, or dividend index.
 
-Explain which market segment is leading. Never analyze the stock independently from the market.
+Identify whether the market is led by financials, dividend assets, central SOEs, consumption, growth, new energy, technology, or broad-based rebound. Explain whether the target stock is part of the leading force or only being passively lifted.
 
-### 2. Relative Strength
+### 3. ETF Flow
+
+Check the relevant passive flows, prioritizing:
+
+- HS300 ETF
+- SSE50 ETF
+- Sector ETF such as Bank ETF
+- Dividend ETF
+- Central SOE ETF
+
+Explain whether passive funds appear to be accumulating or redeeming. ETF flow has higher priority than main-capital flow for core holdings.
+
+### 4. Relative Strength Versus CSI300
 
 Calculate relative strength:
 
@@ -81,7 +117,7 @@ Interpretation:
 
 Relative strength has higher priority than main-capital flow.
 
-### 3. Sector Rotation
+### 5. Relative Strength Versus Industry
 
 Compare the stock against its industry index, then compare the industry index against CSI300.
 
@@ -93,19 +129,7 @@ China Merchants Bank -> Bank Index -> CSI300
 
 Classify the stock as `Leading`, `Following`, or `Lagging`, and explain whether the sector itself is rotating in or out of favor.
 
-### 4. ETF Capital Flow
-
-Check the relevant passive flows, prioritizing:
-
-- HS300 ETF
-- SSE50 ETF
-- Sector ETF such as Bank ETF
-- Dividend ETF
-- Central SOE ETF
-
-Explain whether passive funds appear to be accumulating or redeeming. ETF flow has higher priority than main-capital flow for core holdings.
-
-### 5. Chip Distribution
+### 6. Chip Distribution
 
 Analyze a 20 to 60 trading day window rather than one day.
 
@@ -118,7 +142,24 @@ Evaluate:
 
 Classify the chip state as `Accumulation`, `Shakeout`, or `Distribution`.
 
-### 6. Volume Structure
+### 7. Institution Cost Zone
+
+Estimate the likely institutional cost zone from medium-term price-volume structure, chip cost center, ETF accumulation periods, repeated support zones, and high-volume consolidation areas.
+
+Evaluate:
+
+- Whether price is above, near, or below the estimated institutional cost zone
+- Whether pullbacks are defended near the cost zone
+- Whether the cost center is migrating upward, flat, or downward
+- Whether profit ratio is high enough to create distribution pressure
+
+Interpretation:
+
+- Price near a rising cost zone with controlled volume: possible accumulation or lock-up.
+- Price far above cost zone with weakening RS: possible late-stage holding or distribution risk.
+- Price below cost zone with failed rebounds: possible institutional underweight or rotation away.
+
+### 8. Volume Structure
 
 Evaluate:
 
@@ -129,7 +170,7 @@ Evaluate:
 
 For core holdings, do not treat every large-volume day as distribution. Institutional exchange is common.
 
-### 7. Capital Flow
+### 9. Main Capital Flow
 
 Interpret main-capital flow correctly.
 
@@ -144,7 +185,7 @@ Main-capital outflow does not necessarily mean institutions are leaving. Possibl
 
 Use main-capital flow only as supporting evidence.
 
-### 8. K-Line Structure
+### 10. K-Line Structure
 
 Analyze:
 
@@ -157,7 +198,7 @@ Analyze:
 
 For core holdings, distribution usually appears as relative weakness, repeated failure to make new highs, and rolling tops rather than a sudden crash.
 
-### 9. Institution Behavior Probability
+### 11. Institution Behavior Probability
 
 Output probabilities for:
 
@@ -167,7 +208,7 @@ Output probabilities for:
 
 Ensure probabilities sum to 100%. Explain the evidence behind each probability.
 
-### 10. Investment Conclusion
+### 12. Investment Conclusion
 
 Use all evidence to classify the current stage:
 
@@ -189,29 +230,17 @@ Use this structure by default:
 
 Risk On / Risk Off / Sideways：
 
-主导指数：
+市场宽度：
 
 结论：
 
 ---
 
-# 相对强弱（RS）
+# 指数主导
 
-近5日：
+谁在拉指数：
 
-近10日：
-
-近20日：
-
-结论：
-
----
-
-# 行业比较
-
-个股 vs 行业指数：
-
-行业指数 vs 沪深300：
+目标个股是否属于主导方向：
 
 结论：
 
@@ -227,7 +256,33 @@ SSE50 ETF：
 
 红利/央企ETF：
 
+被动资金判断：
+
 国家队资金判断：
+
+---
+
+# 相对强弱：个股 vs 沪深300
+
+近5日：
+
+近10日：
+
+近20日：
+
+结论：
+
+---
+
+# 相对强弱：个股 vs 行业
+
+个股 vs 行业指数：
+
+行业指数 vs 沪深300：
+
+领先/跟随/落后：
+
+结论：
 
 ---
 
@@ -235,9 +290,21 @@ SSE50 ETF：
 
 筹码集中度：
 
-成本区：
+成本中枢迁移：
+
+获利比例：
 
 是否锁仓：
+
+---
+
+# 机构成本区
+
+估算成本区：
+
+价格相对成本区位置：
+
+成本区是否被防守：
 
 结论：
 

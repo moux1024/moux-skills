@@ -20,7 +20,7 @@
   {
     "id": "a-share-core-stock-analysis",
     "name": "A-Share Core Stock Analysis",
-    "description": "Analyzes institutional behavior of Chinese A-share core holdings using relative strength, ETF flow, sector rotation, chip distribution, and national-team logic instead of literal main-capital flow.",
+    "description": "Analyzes institutional behavior of Chinese A-share core holdings using market regime, index leadership, ETF flow, relative strength, chip distribution, institution cost zone, and national-team logic instead of literal main-capital flow.",
     "repo": "moux1024/moux-skills",
     "path": "skills/a-share-core-stock-analysis",
     "version": "0.1.0",
