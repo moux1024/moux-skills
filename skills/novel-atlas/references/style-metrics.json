@@ -1,0 +1,13 @@
+{
+  "_note": "Machine-read by scripts/anchor.py. The tables in art-styles.md are the human-readable copy; if the two disagree, anchor.py reports it as a failure rather than silently trusting either.",
+  "_why": "min_avatar_edge is the smallest a cropped portrait can be and still hold a face at this style's detail retention. Below it the avatar must degrade to a symbol marker instead of an upscaled blur.",
+  "styles": {
+    "watercolor":     { "label": "水彩绘本",       "min_avatar_edge": 140 },
+    "inkwash":        { "label": "水墨淡彩",       "min_avatar_edge": 120 },
+    "impasto":        { "label": "厚涂写实",       "min_avatar_edge": 100 },
+    "cyberpunk_noir": { "label": "暗调赛博",       "min_avatar_edge": 110 },
+    "woodcut":        { "label": "木刻／铜版刻线", "min_avatar_edge": 90  },
+    "gouache_flat":   { "label": "扁平岩彩",       "min_avatar_edge": 80  },
+    "lego":           { "label": "乐高积木",       "min_avatar_edge": 90  }
+  }
+}
