@@ -1,7 +1,7 @@
 ---
 name: novel-atlas
 description: Turns a full novel into one ultra-high-resolution atlas image that holds its timeline, cast and key events, by designing a blueprint of tiled zones and stitching locally composited tiles into a single picture. This skill should be used when the user wants a 小说全景图, 人物关系图, 剧情时间线大图, 世界观地图, 全书信息图, 人物谱, a one-image book summary, or asks to visualize an entire novel's structure without splitting it across pages. Triggers on a novel file (.txt/.md/.epub/.docx) plus a request for one big image containing the whole story.
-version: 0.1.0
+version: 0.2.0
 ---
 
 # Novel Atlas
@@ -37,14 +37,30 @@ Produces `atlas_build/book.txt`, `atlas_build/chapters.json`, and a chapter-chec
 
 **Stop and read the report before continuing.** Wrong segmentation means wrong timeline, wrong appearance rates, wrong layout. Fix it now — adjust `--chapter-regex`, or split a merged file by hand — and re-run. Never continue past a report whose flagged chapters are the real story chapters.
 
-### Step 1 — Extract structure and cast
+### Step 1 — Measure the book, then decide how to read it
 
-Read `atlas_build/chapters.json` and `book.txt`.
+```bash
+python3 scripts/chunk.py atlas_build/chapters.json -o atlas_build/context
+```
 
-- Below roughly 100k characters, read the whole book in one pass. Do not parallelize small books; chunking only injects merge noise.
-- Above that, split the chapter list into contiguous chunks and extract per chunk, in parallel if the host supports subagents. Each chunk outputs **facts only**, with character names copied verbatim from the source and never merged across chunks.
+It prints the plan and writes `context_plan.json`: token estimate, how many context windows the book is worth, chunk size, chunk count, the digest budget each chunk gets, arc grouping, and a **mode**. Read the mode before reading anything else.
 
-The two-pass rule is what makes the blueprint trustworthy: chunk extraction may run in parallel; **alias merging, event deduplication, timeline alignment and appearance statistics must not**. They need the whole book.
+| mode | meaning | what you do |
+|---|---|---|
+| `single_pass` | the book fits one reliable read | read it whole; do not chunk |
+| `two_pass` | chunks → assembly | extract per chunk, assemble once |
+| `three_pass` | chunks → arc briefs → assembly | add the middle level |
+
+The mode is not a preference. The window is not the budget either: reliable use is about half the advertised window, so a 200k model reads roughly 150k characters of Chinese, not 300k. `chunk.py` does that arithmetic and refuses to recommend a level the numbers do not support.
+
+- **`single_pass`**: read `chapters.json` and `book.txt` in one pass. Do not chunk for safety — chunking injects merge noise and alias drift into a book that fits.
+- **`two_pass` / `three_pass`**: extract per chunk, in parallel if the host supports subagents, with each chunk emitting the fixed digest schema — **facts only**, names copied verbatim, events carrying chapter numbers, two quotes. Compression should land near 2–3% of source; a plan implying 0.5% has replaced the book with a genre average.
+
+**Never read a volume as a unit.** A volume is a narrative boundary, not a context boundary: in a 3.1M-character novel the smallest volume was 275k chars and the largest 944k, six times the read budget. Cut arcs by budget, then nudge to the nearest volume edge.
+
+The two-pass rule is what makes the blueprint trustworthy: chunk extraction may run in parallel; **alias merging, event deduplication, timeline alignment and appearance statistics must not**. They need the whole book. And when two digests disagree, re-read the chapter — digests are derivatives, the source is canon.
+
+Load `references/context-budget.md` whenever the mode is not `single_pass`, or when asked why a book needs splitting.
 
 Infer the four structural features, then let `references/layout-primitives.md` select primitives.
 
@@ -246,9 +262,10 @@ python3 -m pip install pillow
 
 ## References
 
+- `references/context-budget.md` — how long is too long: effective context, the three reading budgets, the digest contract and the arithmetic that picks the chunk size. Load when the book is over ~150k characters.
 - `references/layout-primitives.md` — structural features, primitive vocabulary, adjacency rules, two worked derivations. Load when designing the layout.
 - `references/blueprint-schema.md` — the exact JSON contract consumed by the scripts. Load when writing or debugging a blueprint.
 - `references/art-styles.md` — preset style menu with readability compensation tables and prompt language. Load when asking about or applying art style.
 - `references/style-metrics.json` — the machine-readable avatar size floor per style, read by `anchor.py`. When you change a `Min avatar edge` in `art-styles.md`, change it here too; the script reports any drift between the two as a failure rather than trusting either.
 
-Scripts: `normalize.py` (Step 0) · `stats.py` (Step 2) · `skeleton.py` (Gate 2) · `measure.py` (Step 7 measurement) · `anchor.py` (Step 7) · `finalize.py` (Step 8 tile intake) · `audit_cast.py` (Step 8.5) · `stitch.py` (Step 9). `atlas_common.py` holds the geometry all of them share — label plates and title-block footprint above all. If two scripts disagree about where something is, the bug is that one of them has its own copy.
+Scripts: `normalize.py` (Step 0) · `chunk.py` (Step 1 reading plan) · `stats.py` (Step 2) · `skeleton.py` (Gate 2) · `measure.py` (Step 7 measurement) · `anchor.py` (Step 7) · `finalize.py` (Step 8 tile intake) · `audit_cast.py` (Step 8.5) · `stitch.py` (Step 9). `atlas_common.py` holds the geometry all of them share — label plates and title-block footprint above all. If two scripts disagree about where something is, the bug is that one of them has its own copy.
