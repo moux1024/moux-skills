@@ -6,23 +6,27 @@ The image model does not know the cast. Given "a hall of eleven alcoves" it will
 put eleven faces in them, and every one of those faces is a lie the reader will try to
 place. This step is the only thing standing between the model's improvisation and the
 finished atlas, so it is a gate, not a note: every tile needs a recorded audit that is
-newer than the tile, and any readable face that is not in the zone's `cast.named`
+newer than the tile, and any readable face that is not in its zone's `cast.named`
 whitelist fails the run.
 
 The audit itself is written by the reviewer (a vision pass over the tile), because
 counting faces is a reading task, not a pixel task. This script only holds the record
 honest: it re-hashes the tile so a regenerated image cannot inherit an old verdict.
 
+A zone spanning several grid cells emits one tile per cell, and every one of those tiles
+carries its own entry — a face invented in the second cell of a zone is exactly as wrong
+as one invented in the first, so the audit is keyed by tile, not by zone.
+
 Usage:
   audit_cast.py blueprint.json -d tiles                  # verify, exit 2 on any failure
   audit_cast.py blueprint.json -d tiles --init           # write empty entries for existing tiles
-  audit_cast.py blueprint.json -d tiles --init z7        # ...only for z7
+  audit_cast.py blueprint.json -d tiles --init z7        # ...only for zone z7
 
-Audit file format (tiles/cast_audit.json):
-  { "z7": { "tile": "tiles/z7_2_1.png", "sha256": "...", "verdict": "pass",
-            "figures": [ {"character": "c_jeanne", "prominence": "face", "note": "..."},
-                         {"character": null, "prominence": "figure", "note": "..."} ],
-            "reviewer_note": "...", "fix": "..." } }
+Audit file format (tiles/cast_audit.json), keyed by tile stem <zone>_<col>_<row>:
+  { "z7_2_1": { "zone": "z7", "tile": "tiles/z7_2_1.png", "sha256": "...", "verdict": "pass",
+                "figures": [ {"character": "c_jeanne", "prominence": "face", "note": "..."},
+                             {"character": null, "prominence": "figure", "note": "..."} ],
+                "reviewer_note": "...", "fix": "..." } }
 
 prominence:
   face     — a face a reader could recognise and try to name
@@ -38,8 +42,14 @@ import sys
 PROM = ('face', 'figure', 'prop')
 
 
-def tile_path(tiles_dir, z):
-    return os.path.join(tiles_dir, f"{z['id']}_{z.get('col', 0)}_{z.get('row', 0)}.png")
+def zone_tiles(tiles_dir, z):
+    """Every tile a zone spans: one filename per grid cell it covers."""
+    col, row = int(z.get('col', 0)), int(z.get('row', 0))
+    w, h = int(z.get('w', 1)), int(z.get('h', 1))
+    for c in range(col, col + w):
+        for r in range(row, row + h):
+            stem = f"{z['id']}_{c}_{r}"
+            yield stem, os.path.join(tiles_dir, stem + '.png')
 
 
 def sha(path):
@@ -58,7 +68,7 @@ def main():
     ap.add_argument('--init', nargs='*', metavar='ZONE', help='create empty pending entries')
     ap.add_argument('-o', '--out', default=None)
     ap.add_argument('--require', action='store_true',
-                    help='also fail when a zone has no tile yet (full-run mode)')
+                    help='also fail when an expected tile is missing (full-run mode)')
     args = ap.parse_args()
 
     bp = json.load(open(args.blueprint, encoding='utf-8'))
@@ -76,18 +86,19 @@ def main():
         for z in bp['zones']:
             if only and z['id'] not in only:
                 continue
-            p = tile_path(tdir, z)
-            if not os.path.exists(p):
-                continue
-            audit[z['id']] = {
-                'tile': os.path.relpath(p, base),
-                'sha256': sha(p),
-                'verdict': 'pending',
-                'figures': [],
-                'reviewer_note': '',
-                'fix': '',
-            }
-            n += 1
+            for stem, p in zone_tiles(tdir, z):
+                if not os.path.exists(p):
+                    continue
+                audit[stem] = {
+                    'zone': z['id'],
+                    'tile': os.path.relpath(p, base),
+                    'sha256': sha(p),
+                    'verdict': 'pending',
+                    'figures': [],
+                    'reviewer_note': '',
+                    'fix': '',
+                }
+                n += 1
         os.makedirs(tdir, exist_ok=True)
         json.dump(audit, open(apath, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
         print(f"wrote {n} pending entr{'y' if n == 1 else 'ies'} to {os.path.relpath(apath, base)}")
@@ -96,69 +107,74 @@ def main():
 
     hard, soft, rows = [], [], []
     for z in bp['zones']:
-        p = tile_path(tdir, z)
-        if not os.path.exists(p):
-            if args.require:
-                hard.append(f"{z['id']}: no tile at {os.path.relpath(p, base)}")
-            continue
-        rec = audit.get(z['id'])
-        if not rec:
-            hard.append(f"{z['id']}: tile exists but has no cast audit — run --init and fill it in")
-            continue
-        cur = sha(p)
-        if rec.get('sha256') != cur:
-            hard.append(f"{z['id']}: tile changed since the audit (sha mismatch) — "
-                        f"the verdict belongs to a different image; re-audit")
-            continue
-        if rec.get('verdict') not in ('pass', 'fixed'):
-            hard.append(f"{z['id']}: verdict is '{rec.get('verdict')}' — only pass/fixed may stitch")
-            continue
-
         named = {n['character']: n for n in (z.get('cast') or {}).get('named', [])}
         extra_max = int((z.get('cast') or {}).get('extras_max', 0) or 0)
-        seen, faceless_seen, extras = set(), [], 0
-        for f in rec.get('figures', []):
-            cid = f.get('character')
-            pr = f.get('prominence')
-            if pr not in PROM:
-                hard.append(f"{z['id']}: figure entry has prominence '{pr}' (use face/figure/prop)")
-            if cid is None:
+
+        for stem, p in zone_tiles(tdir, z):
+            if not os.path.exists(p):
+                if args.require:
+                    hard.append(f"{stem}: no tile at {os.path.relpath(p, base)}")
+                continue
+            rec = audit.get(stem)
+            if not rec:
+                hard.append(f"{stem}: tile exists but has no cast audit — run --init and fill it in")
+                continue
+            if rec.get('zone') and rec.get('zone') != z['id']:
+                hard.append(f"{stem}: entry claims zone '{rec.get('zone')}' but the grid puts this "
+                            f"tile in {z['id']} — zones were re-cut after the audit; re-init")
+                continue
+            cur = sha(p)
+            if rec.get('sha256') != cur:
+                hard.append(f"{stem}: tile changed since the audit (sha mismatch) — "
+                            f"the verdict belongs to a different image; re-audit")
+                continue
+            if rec.get('verdict') not in ('pass', 'fixed'):
+                hard.append(f"{stem}: verdict is '{rec.get('verdict')}' — only pass/fixed may stitch")
+                continue
+
+            seen, faces_seen, extras = set(), [], 0
+            for f in rec.get('figures', []):
+                cid = f.get('character')
+                pr = f.get('prominence')
+                if pr not in PROM:
+                    hard.append(f"{stem}: figure entry has prominence '{pr}' (use face/figure/prop)")
+                if cid is None:
+                    if pr == 'face':
+                        hard.append(f"{stem}: unnamed face in frame "
+                                    f"({(f.get('note') or '')[:60]}) — a reader will try to name it")
+                    elif pr == 'figure':
+                        extras += 1
+                    continue
+                if cid not in named:
+                    hard.append(f"{stem}: figure '{cid}' is not in {z['id']}'s cast.named — "
+                                f"the tile invented a character")
+                    continue
+                seen.add(cid)
+                if named[cid].get('prominence') == 'prop' and pr != 'prop':
+                    hard.append(f"{stem}: {cid} must appear as a prop, not as a {pr}")
                 if pr == 'face':
-                    hard.append(f"{z['id']}: unnamed face in frame "
-                                f"({(f.get('note') or '')[:60]}) — a reader will try to name it")
-                elif pr == 'figure':
-                    extras += 1
-                continue
-            if cid not in named:
-                hard.append(f"{z['id']}: figure '{cid}' is not in cast.named — "
-                            f"the tile invented a character")
-                continue
-            seen.add(cid)
-            if named[cid].get('prominence') == 'prop' and pr != 'prop':
-                hard.append(f"{z['id']}: {cid} must appear as a prop, not as a {pr}")
-            if pr == 'face':
-                faceless_seen.append(cid)
+                    faces_seen.append(cid)
 
-        if extras > extra_max:
-            hard.append(f"{z['id']}: {extras} extra figures against extras_max {extra_max} — "
-                        f"cut the crowd or raise the cap and re-audit")
-        expect = {c for c, n in named.items() if n.get('prominence') != 'prop'}
-        for cid in sorted(expect - seen):
-            soft.append(f"{z['id']}: {cid} is in the cast but was not found in the tile — "
-                        f"it may have been cropped out or buried in shadow")
-        for c, n in named.items():
-            if n.get('prominence') == 'prop' and c in seen:
-                r = next((f for f in rec['figures'] if f.get('character') == c), {})
-                if r.get('prominence') == 'prop':
-                    soft.append(f"{z['id']}: {c} appears as an object, as designed — "
-                                f"make sure no face was drawn on it")
+            if extras > extra_max:
+                hard.append(f"{stem}: {extras} extra figures against {z['id']}'s extras_max "
+                            f"{extra_max} — cut the crowd or raise the cap and re-audit")
+            expect = {c for c, n in named.items() if n.get('prominence') != 'prop'}
+            for cid in sorted(expect - seen):
+                soft.append(f"{stem}: {cid} is in {z['id']}'s cast but was not found in the tile — "
+                            f"it may have been cropped out or buried in shadow")
+            for c, n in named.items():
+                if n.get('prominence') == 'prop' and c in seen:
+                    r = next((f for f in rec.get('figures', []) if f.get('character') == c), {})
+                    if r.get('prominence') == 'prop':
+                        soft.append(f"{stem}: {c} appears as an object, as designed — "
+                                    f"make sure no face was drawn on it")
 
-        rows.append({'zone': z['id'], 'tile': rec.get('tile'), 'verdict': rec.get('verdict'),
-                     'named': len(seen), 'faces': len(faceless_seen), 'extras': extras})
+            rows.append({'tile': stem, 'zone': z['id'], 'verdict': rec.get('verdict'),
+                         'named': len(seen), 'faces': len(faces_seen), 'extras': extras})
 
     print(f"cast audit — {len(rows)} tile(s) checked, {len(hard)} problem(s), {len(soft)} note(s)\n")
     for r in rows:
-        print(f"  {r['zone']:<4} {r['verdict']:<6} named {r['named']}  faces {r['faces']}  "
+        print(f"  {r['tile']:<10} {r['verdict']:<6} named {r['named']}  faces {r['faces']}  "
               f"extras {r['extras']}")
     for m in soft:
         print(f"\n[note]  {m}")

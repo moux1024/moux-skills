@@ -91,7 +91,8 @@ def main():
                     metavar="x0,y0,x1,y1",
                     help="watermark rect in SOURCE pixels; repeatable")
     ap.add_argument("--stamp", metavar="TILE_ID",
-                    help="write provenance (source size, scale) into cast_audit.json")
+                    help="record provenance (source size, scale) in cast_audit.json under "
+                         "the tile's key, e.g. z9_0_2")
     ap.add_argument("--audit", default=None,
                     help="path to cast_audit.json (default: beside --out)")
     args = ap.parse_args()

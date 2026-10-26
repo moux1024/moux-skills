@@ -11,9 +11,11 @@ neither the skeleton nor the final stitch can answer in time:
   3. Is the box square? A non-square box is silently stretched to a circle by the
      stitcher, so a 0.17 x 0.30 box ships a squashed face.
 
-Run it twice: once after Gate 2 with no tiles (arithmetic only, still catches deformed
-and undersized boxes), and again after Gate 3 with the home tiles present (contact sheet
-for eye verification).
+Run it whenever the geometry or a home tile changes: after Gate 2 with no tiles
+(arithmetic only — still catches deformed and undersized boxes), after the style proof
+for the proof zone's crops, and after the batch for every remaining home zone. A row
+whose tile does not exist yet passes on arithmetic alone and shows `awaiting tile` on
+the sheet; the atlas is not done until every row reads `ok` against real pixels.
 
 Usage:
   python3 scripts/anchor.py atlas_build/blueprint.json -t atlas_build/tiles -o atlas_build/anchors
@@ -510,11 +512,15 @@ def main():
     current = {}
     if args.tiles:
         for z in bp["zones"]:
-            tp = tile_path(args.tiles, z["id"], int(z.get("col", 0)), int(z.get("row", 0)))
-            if tp:
-                current[z["id"]] = tile_fingerprint(tp)
-    stale = sorted(z for z, h in current.items()
-                   if z in previous and previous[z] != h)
+            # every cell the zone spans, not just its origin: a portrait.box can live in
+            # any cell, and a regenerated non-origin tile is just as stale
+            for c in range(int(z.get("col", 0)), int(z.get("col", 0)) + int(z.get("w", 1))):
+                for r in range(int(z.get("row", 0)), int(z.get("row", 0)) + int(z.get("h", 1))):
+                    tp = tile_path(args.tiles, z["id"], c, r)
+                    if tp:
+                        current[f"{z['id']}_{c}_{r}"] = tile_fingerprint(tp)
+    stale = sorted(t for t, h in current.items()
+                   if t in previous and previous[t] != h)
     size = build_contact_sheet(bp, rows, args.tiles, cell, metrics, style,
                                sheet_path, sync_problems)
 
@@ -567,8 +573,8 @@ def main():
 
     if stale:
         print("\n[stale] these home tiles were regenerated since the last calibration:")
-        for zid in stale:
-            print(f"  - {zid}: every portrait.box inside it now points at different pixels")
+        for t in stale:
+            print(f"  - {t}: every portrait.box inside it now points at different pixels")
         print("  Look at the contact sheet again before generating anything else.")
 
     print(f"\ncontact sheet {sheet_path}  ({size[0]}x{size[1]})")

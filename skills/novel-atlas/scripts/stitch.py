@@ -22,10 +22,6 @@ import atlas_common as ac  # noqa: E402
 FLOOR = 4.5
 MAX_SCRIM = 0.92
 
-# Rects that are painted after the labels (the cartouche plate). A label whose box lands
-# under one is reported, so the declared position can be moved rather than shipped cut in half.
-AVOID_RECTS = []
-
 
 def find_tile(tile_dir, zone, c, r):
     for name in (f"{zone['id']}_{c}_{r}.png", f"{c}_{r}.png",
@@ -398,6 +394,14 @@ def main():
                 continue
             box = (ch.get("portrait") or {}).get("box")
             if not box or len(box) != 4:
+                # A faceless character still gets its name: the skeleton showed one at
+                # prop_at, and an unnamed prop on the finished atlas reads as background
+                # furniture rather than as the character it stands for.
+                if ch.get("faceless") and ch.get("prop_at"):
+                    ppx, ppy = float(ch["prop_at"][0]), float(ch["prop_at"][1])
+                    place(str(ch.get("name", cid)), x + ppx * w, y + ppy * h + cell * 0.042,
+                          30 * cell / 2048.0, z["id"], anchor="ct", tonal=z.get("tonal"),
+                          min_alpha=0.58)
                 continue
             bx = x + float(box[0]) * w
             by = y + float(box[1]) * h
@@ -446,7 +450,15 @@ def main():
                 continue
             kind = e.get("kind", "event")
             mark = accent if kind == "irreversible" else muted
-            place(str(e.get("label", "")), pos[0] + efont * 0.75, pos[1] - efont * 0.55,
+            label = str(e.get("label", "")).strip()
+            if not label:
+                # No caption, still a node: the dot is the anchor the connectors point
+                # at, and placing empty text would paint a plate with nothing in it.
+                r_ = efont * 0.28
+                draw.ellipse([pos[0] - r_, pos[1] - r_, pos[0] + r_, pos[1] + r_],
+                             fill=mark + (240,), outline=ink + (200,), width=2)
+                continue
+            place(label, pos[0] + efont * 0.75, pos[1] - efont * 0.55,
                   efont, e.get("zone"), anchor="lt", marker=mark,
                   tonal=(zone_map.get(e.get("zone")) or {}).get("tonal"))
 

@@ -36,7 +36,7 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
       },
       "body": "右臂自肘下为义肢，掌心嵌一枚可拆的窝心锤；颈侧一道旧接口疤；平时覆仿生表皮",
       "body_en": "right arm prosthetic from the elbow down, a detachable pommel weight set in the palm",
-      "portrait": { "zone": "z3", "box": [0.32, 0.24, 0.17, 0.30] }
+      "portrait": { "zone": "z3", "box": [0.32, 0.24, 0.17, 0.17] }
     }
   ],
   "events": [
@@ -78,7 +78,7 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
 
 ## Field notes
 
-**`meta.canvas`** — `cols × rows` is the grid. `cell` is the generation resolution, normally the model's maximum square size. Final canvas is `cols*cell × rows*cell`; there is no upscaling anywhere. Keep `cols*rows` between 6 and 16. `bleed` is the fraction cropped from each tile edge before compositing: generate tiles with the subject extending past the frame, then crop, so figures are not guillotined at the seam.
+**`meta.canvas`** — `cols × rows` is the grid. `cell` is the generation resolution, normally the model's maximum square size. Final canvas is `cols*cell × rows*cell`. Keep `cols*rows` between 6 and 16. `bleed` is the fraction cropped from each tile edge before compositing: generate tiles with the subject extending past the frame, then crop, so figures are not guillotined at the seam. That crop-and-refit is the pipeline's one deliberate resample — every tile comes back about `1/(1−2·bleed)` ≈ 1.19× at the default 0.08; everything else is pasted 1:1 or downscaled. What remains forbidden is generating below `cell` and upscaling to fake resolution.
 
 **`structure`** — the four features from `references/layout-primitives.md`. Mandatory; they are the audit trail for why the layout looks the way it does.
 
@@ -94,7 +94,7 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
 - `portrait.box`: `[x, y, w, h]` in home-zone fraction. **This is the crop rectangle for every remote avatar, and it is a head, not a figure.** Two requirements the scripts enforce: it must be square on the canvas (`w*zone_w == h*zone_h`, because the stitcher force-fits it into a circle), and its pixel side must clear both the style's minimum avatar edge and the largest size the character is drawn at anywhere else. Write an estimate at blueprint time, then settle it in Step 7 against the real tile — `anchor.py` prints the numbers and the corrections.
 - `body`: the character's hardware, in the text's own terms — which limb was replaced and with what, whether the cranium opens, what the eye does, whether any skin is left. This is what goes into the zone prompt's `[BODY]` block. `body_en` is the same thing in the prompt's language; a Chinese `body` inside an English prompt gets obeyed inconsistently and sometimes renders as glyphs.
 - `body` is per character, but a character's body changes with the era. When a zone shows them at a different age or in a different chassis, override it **on that zone's cast entry**, not here: `zones[].cast.named[].body`.
-- `expression`: `{ "key", "print", "note" }`. `key` names the face from the style's expression grammar (`references/art-styles.md`; for bricks: `factory_smile`, `smirk`, `aghast`, `cry`, `unhinged`, `menace`, `deadpan`, `worry`, `stare`, `off`, `misregistered`, `blank`). `print` is the stroke-level description that goes verbatim into `[FACE]` — brows, eyes, pupils, mouth, marks — written as print geometry, never as muscle. `note` records the line of text that justifies it. A character whose expression cannot be traced to the text keeps `factory_smile`: the default head is a statement about them, not a missing value.
+- `expression`: `{ "key", "print", "note" }`. `key` names the face from the style's expression grammar (`references/art-styles.md`; for bricks: `factory_smile`, `smirk`, `aghast`, `cry`, `unhinged`, `menace`, `deadpan`, `worry`, `stare`, `off`, `misregistered`, `blank`). `print` is the stroke-level description that goes verbatim into `[FACE]` — brows, eyes, pupils, mouth, marks — written as print geometry, never as muscle. `note` records the line of text that justifies it. A character whose expression cannot be traced to the text keeps `factory_smile`: the default head is a statement about them, not a missing value. Only brick styles publish a key grammar today; for every other style omit `key` and keep `print` + `note`.
 - `faceless`: `true` when the text says the character is not humanoid. Such a character gets **no** portrait box (`portrait: {box: null}`), a `prop_at: [x, y]` so the skeleton can mark where the object stands, and a `prop` description (`body`). Give them a face and you have invented a person.
 - `same_person_as`: comma-separated ids of the character entries that are the same individual in a different chassis. Each keeps its own home zone and portrait; the field exists so the reader, and the reviewer, know the face is supposed to match and the body is not.
 
@@ -118,7 +118,7 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
   `prominence` is `full`, `mid`, or `prop` (an object standing in for a non-humanoid character — it is counted separately and never as a figure). `extras_max` caps **faceless** background figures; `extras_note` says what they are allowed to be. Every id in `characters` and `avatar_slots` must appear in `cast.named`, and `skeleton.py` fails when one does not — the whitelist has to be the same list the artwork is audited against, or the audit is theatre. A face outside this list fails Step 8.5.
 - `avatar_slots`: remote appearances. `size` is a fraction of the zone's shorter side. These are cropped from the home tile — they are never generated.
 - `labels`: `anchor` is `lt` (left-top), `ct` (centre-top) or `lm` (left-middle). `size` for a 2048 cell; the stitcher scales it. **Labels must sit below y ≈ 0.16**, the band reserved for the zone name and caption — `skeleton.py` reports a collision otherwise.
-- `prompt`: the full self-contained zone prompt, in the five-part order given in SKILL.md.
+- `prompt`: the full self-contained zone prompt, in the block order given in SKILL.md.
 
 **`coverage`** — the honesty block. `chapters_covered` may be omitted if `chapters_total` and `chapters_missing` are both given. Whatever is omitted must appear in a `*_missing` array, and the cartouche prints it on the final image.
 
@@ -140,6 +140,7 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
 | Every tile has an audit newer than the tile | `audit_cast.py` | A regenerated image inherits a stale pass |
 | No readable face outside `cast.named` | `audit_cast.py` | The atlas names somebody the book never wrote |
 | Every expected tile exists | `stitch.py` | Hatched placeholder in the final image |
+| T1 ≤ 12 and T2 ≤ 40 | `skeleton.py` | A 20-T1 canvas has no home zones left to give; a 60-T2 canvas has no label space |
 
 Both scripts exit non-zero on failure. Treat non-zero as "not done", not as a warning.
 

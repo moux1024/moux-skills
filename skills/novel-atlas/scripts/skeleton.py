@@ -209,6 +209,19 @@ def main():
                         f"arrives squashed. A standing figure is not a portrait box; "
                         f"square it by hand or with `anchor.py --write-back`")
 
+    # --- tier caps
+    # Policy with teeth. A 20-T1 canvas has no home zones left to give each character,
+    # and a 60-T2 canvas has no label space; both are caught here, with the rest of the
+    # structural promises, before any tile is paid for.
+    t1s = [c for c in bp.get("characters", []) if c.get("tier") == "T1"]
+    t2s = [e for e in bp.get("events", []) if e.get("tier") == "T2"]
+    if len(t1s) > 12:
+        problems.append(f"{len(t1s)} T1 characters against the cap of 12 — demote by lowest "
+                        f"hit_rate first and record each demotion in coverage.demotions")
+    if len(t2s) > 40:
+        problems.append(f"{len(t2s)} T2 events against the cap of 40 — drop the least "
+                        f"irreversible first and name what was dropped in coverage.turning_missing")
+
     # --- cast whitelist
     # One authority for who may be drawn in a zone. Both the home characters and the remote
     # avatars must appear here, and the prompt repeats the count, so a tile that invents a

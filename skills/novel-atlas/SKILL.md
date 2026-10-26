@@ -1,7 +1,7 @@
 ---
 name: novel-atlas
 description: Turns a full novel into one ultra-high-resolution atlas image that holds its timeline, cast and key events, by designing a blueprint of tiled zones and stitching locally composited tiles into a single picture. This skill should be used when the user wants a 小说全景图, 人物关系图, 剧情时间线大图, 世界观地图, 全书信息图, 人物谱, a one-image book summary, or asks to visualize an entire novel's structure without splitting it across pages. Triggers on a novel file (.txt/.md/.epub/.docx) plus a request for one big image containing the whole story.
-version: 0.2.0
+version: 0.3.0
 ---
 
 # Novel Atlas
@@ -13,11 +13,11 @@ Never produce multiple images meant to be read in sequence. Information must not
 ## Non-negotiable rules
 
 1. **AI draws, code writes.** Generated tiles contain zero text. Every character name, event title, date and connector label is composited by `scripts/stitch.py`. Never ask an image model to render text, and never ship text that appeared inside a generated tile.
-2. **One home, one full body.** A T1 character gets exactly one full-body depiction, in its home zone. Everywhere else the character appears only as an avatar cropped by code from that home tile. Regenerating the same character in another zone is forbidden by default. The crop is a **square box on the face**, and it must be large enough to survive the smallest place that character appears — both are verified by script before the batch runs, not discovered in the finished image.
+2. **One home, one full body.** A T1 character gets exactly one full-body depiction, in its home zone. Everywhere else the character appears only as an avatar cropped by code from that home tile. Regenerating the same character in another zone is forbidden by default. The crop is a **square box on the face**, sized for the **largest** place that character appears anywhere else — the size arithmetic is verified by script before the batch runs, and the box is checked against the real tile the moment that tile exists, never discovered in the finished image.
 3. **Structure picks layout, not genre.** Infer four structural features from the text, then compose layout primitives. Genre is a prior, never a determinant. See `references/layout-primitives.md`.
-4. **Selection is tiered and capped.** T1 ≤ 12, T2 ≤ 40. Omission is allowed; silent omission is not — the blueprint must report coverage gaps to the user.
+4. **Selection is tiered and capped.** T1 ≤ 12, T2 ≤ 40 — `skeleton.py` fails a blueprint over either cap. Omission is allowed; silent omission is not — the blueprint must report coverage gaps to the user.
 5. **Seams are designed, not faded.** Zones are separated by explicit dividers. No feathering: feathering two unrelated pictures only produces a dirty band.
-6. **Three gates before spending on tiles** — content list, local skeleton, single-zone style proof — **plus one calibration after the proof.** Do not generate the full tile set until all three gates pass and every T1 anchor reads `ok`.
+6. **Three gates before spending on tiles** — content list, local skeleton, single-zone style proof — **plus anchor calibration, twice.** Before the batch: every T1 anchor passes the arithmetic (square, in-zone, above the style floor, sized for its largest remote appearance) and the proof zone's crops are eye-verified on the contact sheet. Before the stitch: every anchor reads `ok` against its real home tile — home zones that did not exist at proof time are calibrated as soon as Step 8 generates them.
 7. **Ask for art style before designing.** No style given → ask. Never pick silently.
 8. **Fidelity over comfort, symbol over rewrite.** If content triggers a generation policy, degrade to symbolic depiction (silhouette, shadow, negative space, prop) and label the substitution explicitly. Never let a model substitute a softened version of the text and present it as faithful.
 9. **A body is not a person.** One identity may occupy several chassis over the story. Each chassis is its own character entry with its own portrait and its own `body` — but they must share one face model and declare `same_person_as`. Collapsing them into a single entry (or, worse, merging two different people into one) is a factual error the reader will catch instantly.
@@ -169,6 +169,8 @@ The contact sheet shows, per T1: the home tile with the crop rectangle on it, th
 
 Look at it and answer one question: **is the red rectangle on the face?** A box can be arithmetically perfect and still frame a shoulder. The numbers in `blueprint.json` are hand-written, not derived; change them and re-run until every row reads `ok`. Re-running costs seconds.
 
+Home zones that do not exist yet show `awaiting tile` and pass on arithmetic alone — that is expected at proof time, when only one zone has been drawn. Re-run this script once Step 8 brings the remaining home tiles in; the atlas is not done while any row still awaits its tile.
+
 When the box is in the wrong *place* — not merely too small — do not guess again from the contact sheet. Bake a grid onto the home tile and read the head's four edges off it:
 
 ```bash
@@ -196,7 +198,7 @@ Every returned image still carries a watermark, and image-to-image tops out near
 
 ```bash
 python3 scripts/finalize.py gen/raw.png -o tiles/z9_0_2.png --cell 2048 \
-    --wm 880,946,1024,1024 --stamp z9
+    --wm 880,946,1024,1024 --stamp z9_0_2
 ```
 
 `--wm` fills the stamp by continuing the vertical gradient found just above it, column by column. Cloning clean artwork from beside the stamp looks fine in theory and fails on screen: the floor is a gradient, so the clone sits one tone off and reads as a rectangle. `--stamp` writes the source size and an `upscaled` flag into `cast_audit.json`, so a half-resolution tile is declared in the record rather than hidden in a habit.
@@ -212,10 +214,10 @@ python3 scripts/audit_cast.py atlas_build/blueprint.json -d atlas_build/tiles --
 python3 scripts/audit_cast.py atlas_build/blueprint.json -d atlas_build/tiles          # verify
 ```
 
-For each tile, look at it — full frame, plus each dark corner brightened 2–3×, because the model hides people in shadow — and write `atlas_build/tiles/cast_audit.json`:
+For each tile, look at it — full frame, plus each dark corner brightened 2–3×, because the model hides people in shadow — and write `atlas_build/tiles/cast_audit.json`. Entries are keyed by tile, not by zone: a zone spanning several cells has one entry per tile (`z7_2_1`, `z7_2_2`, …), because a face invented in the second cell is exactly as wrong as one invented in the first.
 
 ```json
-{ "z7": { "tile": "tiles/z7_2_1.png", "sha256": "…", "verdict": "pass",
+{ "z7_2_1": { "zone": "z7", "tile": "tiles/z7_2_1.png", "sha256": "…", "verdict": "pass",
   "figures": [
     { "character": "c_jeanne", "prominence": "face",   "note": "…" },
     { "character": "c_liu",    "prominence": "face",   "note": "…" },

@@ -40,9 +40,11 @@ The constraint that actually binds is **not** how much the reader can read. It i
 chunks        = ceil(total_chars / chunk_chars)
 digest_budget = assembly_budget / chunks          # chars allowed per chunk digest
 
-digest_budget ≥ 600  → two passes are enough
-digest_budget < 500  → one more level: chunk digests → arc briefs → assembly
+digest_budget ≥ 600  and  total ≤ 4 × read budget   → two passes are enough
+digest_budget < 500  or   total > 4 × read budget   → one more level: arc briefs
 ```
+
+Two ceilings, two jobs. The digest floor keeps each chunk's digest informative; the 4× cap keeps the corpus comparable. Past roughly two dozen digests the assembly call stops comparing and starts skimming, and alias merging, event deduplication and timeline alignment are exactly the comparisons that die first — so a five-window book rolls up to arc briefs even when every digest could have had two thousand characters.
 
 This is why chunk size is not taste. Make the chunks bigger and you make each digest richer but fewer; make them smaller and the digest corpus outgrows the assembly call. The digest has to hold events **with chapter numbers** and **quotes**, so below ~500 characters it becomes a plot-free blur.
 

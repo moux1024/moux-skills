@@ -14,6 +14,7 @@ aliases.json maps ONE canonical name to every surface form the text uses:
 import argparse
 import json
 import os
+import re
 import sys
 
 T1_RATE = 0.15
@@ -32,7 +33,9 @@ def normalize_aliases(raw):
         forms = [v.strip() for v in val if v and v.strip()]
         if key.strip() not in forms:
             forms.insert(0, key.strip())
-        # Longest form first so overlapping names do not double count inside a chapter.
+        # Longest form first: the counting regex tries alternatives left to right, so
+        # "松岛宏" must precede "松岛" or one mention of the long form would be counted
+        # again under the short one.
         out[key.strip()] = sorted(set(forms), key=len, reverse=True)
     return out
 
@@ -61,10 +64,13 @@ def main():
     results = []
 
     for canon, forms in aliases.items():
+        # one consumed match per occurrence, so nested aliases count once
+        # (a 松岛 inside 松岛宏 is part of the same mention, not a second one)
+        rx = re.compile("|".join(re.escape(f) for f in forms))
         hits, mentions, first, last = 0, 0, None, None
         for ch in chapters:
             body = book[ch["start"]:ch["end"]]
-            n = sum(body.count(form) for form in forms)
+            n = len(rx.findall(body))
             if n:
                 hits += 1
                 mentions += n

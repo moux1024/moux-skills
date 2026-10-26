@@ -251,6 +251,8 @@ def label_boxes(bp, cell):
         z = zones.get(e.get("zone"))
         if not z:
             continue
+        if not str(e.get("label", "")).strip():
+            continue        # an empty label paints no plate; its dot is not a collision
         x, y, w, h = zone_rect(z, cell)
         ex = x + float(e.get("x", 0.5)) * w
         ey = y + float(e.get("y", 0.5)) * h
@@ -265,11 +267,19 @@ def label_boxes(bp, cell):
         for cid in z.get("characters") or []:
             ch = chidx.get(cid) or {}
             box = (ch.get("portrait") or {}).get("box")
+            name = str(ch.get("name", cid))
             if not box or len(box) != 4:
+                # faceless characters get their name at prop_at instead — the same plate
+                # stitch.py paints, so the collision pass sees it too
+                if ch.get("faceless") and ch.get("prop_at"):
+                    ppx, ppy = float(ch["prop_at"][0]), float(ch["prop_at"][1])
+                    out.append((z["id"], "name", name,
+                                _anchor_box(draw, name, x + ppx * w,
+                                            y + ppy * h + cell * 0.042,
+                                            30 * cell / 2048.0, "ct")))
                 continue
             bx, by = x + float(box[0]) * w, y + float(box[1]) * h
             bw, bh = float(box[2]) * w, float(box[3]) * h
-            name = str(ch.get("name", cid))
             out.append((z["id"], "name", name,
                         _anchor_box(draw, name, bx + bw * 0.5, by + bh + cell * 0.012,
                                     30 * cell / 2048.0, "ct")))
