@@ -7,12 +7,21 @@ every tool result including failures. It is the *only* place where the real
 friction lives -- the retries, the wrong turns, the moment the question
 changed. A story written from memory will smooth all of that away.
 
+A long session can hold a year of tool spam: one 11 MB transcript expands to
+~450k characters, which will not fit in any context window. So there are
+three ways to cut it down before reading:
+
+    --brief        keep the shape, drop the noise (user full, assistant short,
+                   tool calls collapsed, failures and decisions kept)
+    --grep PAT     only the turns that mention something, plus one neighbour
+    --max-chars N  hard ceiling, cut from the middle (keeps both ends)
+
 Usage:
-    python3 extract_session.py --latest                 # newest session of cwd's project
-    python3 extract_session.py --session <path.jsonl>
-    python3 extract_session.py --list                   # recent sessions across projects
-    python3 extract_session.py --latest --scan          # sensitive-item scan too
-    python3 extract_session.py --latest --out digest.md
+    python3 extract_session.py --latest
+    python3 extract_session.py --list
+    python3 extract_session.py --session <path.jsonl> --brief --out digest.md
+    python3 extract_session.py --session <path.jsonl> --grep 报错
+    python3 extract_session.py --latest --scan
 """
 
 import argparse
@@ -45,7 +54,7 @@ def find_latest(cwd=None):
     return max(files, key=os.path.getmtime) if files else None
 
 
-def list_sessions(limit=15):
+def list_sessions(limit=20):
     files = glob.glob(os.path.join(PROJECTS, "*", "*.jsonl"))
     files.sort(key=os.path.getmtime, reverse=True)
     rows = []
@@ -133,110 +142,222 @@ SIGNAL_MARKS = {
     "Skill": "调技能",
 }
 
+DECISION_TOOLS = {"AskUserQuestion"}
+WRITE_TOOLS = {"Write", "Edit"}
 
-def digest(path, max_text=1400, max_result=420):
-    recs = []
+
+def parse(path):
+    """Records -> list of turns, each carrying the tool events that followed it."""
+    turns = []
+    cur = None
+
     for line in open(path, encoding="utf-8", errors="replace"):
         line = line.strip()
         if not line:
             continue
         try:
-            recs.append(json.loads(line))
+            rec = json.loads(line)
         except Exception:
             continue
-
-    t0 = t1 = None
-    turns = {"user": 0, "assistant": 0}
-    calls = 0
-    fails = 0
-    written = []
-    asked = 0
-    body = []
-    step = 0
-
-    for rec in recs:
         ts = rec.get("timestamp")
-        if isinstance(ts, (int, float)):
-            t0 = ts if t0 is None else min(t0, ts)
-            t1 = ts if t1 is None else max(t1, ts)
 
         for kind, payload in blocks(rec):
             if kind == "text":
                 role, text = payload
                 if not text or role not in ("user", "assistant"):
                     continue
-                turns[role] += 1
-                step += 1
-                clock = ""
-                if isinstance(ts, (int, float)):
-                    clock = datetime.fromtimestamp(ts / 1000).strftime("%H:%M")
-                who = "用户" if role == "user" else "助手"
-                body.append("\n### %d · %s %s\n\n%s" % (step, who, clock, clip(text, max_text)))
-
+                cur = {"role": role, "ts": ts, "text": text, "events": []}
+                turns.append(cur)
             elif kind == "call":
                 name, args = payload
-                calls += 1
-                if name == "AskUserQuestion":
-                    asked += 1
-                if name in ("Write", "Edit"):
-                    try:
-                        a = json.loads(args)
-                        p = a.get("file_path") or a.get("path")
-                        if p:
-                            written.append(p)
-                    except Exception:
-                        pass
-                note = SIGNAL_MARKS.get(name, "")
-                body.append(
-                    "  - → `%s`%s %s" % (name, (" · " + note) if note else "", clip(args, 160))
+                if cur is None:
+                    cur = {"role": "assistant", "ts": ts, "text": "", "events": []}
+                    turns.append(cur)
+                cur["events"].append(
+                    {"kind": "call", "name": name, "args": args, "ts": ts}
                 )
-
             elif kind == "result":
                 name, status, text = payload
-                bad = looks_failed(status, text)
-                if bad:
-                    fails += 1
-                flag = "✗失败" if bad else "✓"
-                body.append("  - ← %s %s %s" % (flag, name, clip(text, max_result if bad else max_result // 2)))
+                if cur is None:
+                    continue
+                cur["events"].append(
+                    {"kind": "result", "name": name, "status": status,
+                     "text": text, "ts": ts, "failed": looks_failed(status, text)}
+                )
+    return turns
 
+
+# ---------------------------------------------------------------- render
+
+def stats(turns):
+    calls = sum(1 for t in turns for e in t["events"] if e["kind"] == "call")
+    fails = sum(1 for t in turns for e in t["events"]
+                if e["kind"] == "result" and e.get("failed"))
+    asked = sum(1 for t in turns for e in t["events"]
+                if e["kind"] == "call" and e["name"] in DECISION_TOOLS)
+    writes = []
+    for t in turns:
+        for e in t["events"]:
+            if e["kind"] == "call" and e["name"] in WRITE_TOOLS:
+                try:
+                    a = json.loads(e["args"])
+                    p = a.get("file_path") or a.get("path")
+                    if p and p not in writes:
+                        writes.append(p)
+                except Exception:
+                    pass
+    return dict(
+        calls=calls, fails=fails, asked=asked, writes=writes,
+        user=sum(1 for t in turns if t["role"] == "user"),
+        assistant=sum(1 for t in turns if t["role"] == "assistant"),
+    )
+
+
+def header(path, turns, st):
+    ts = [t["ts"] for t in turns if isinstance(t.get("ts"), (int, float))]
     dur = ""
-    if t0 and t1:
-        mins = (t1 - t0) / 60000
+    if ts:
+        mins = (max(ts) - min(ts)) / 60000
         dur = "%d 分钟" % mins if mins < 120 else "%.1f 小时" % (mins / 60)
 
-    seen = []
-    for p in written:
-        if p not in seen:
-            seen.append(p)
-
-    head = [
+    out = [
         "# 会话时间线（原始素材）",
         "",
         "- 文件：`%s`" % path,
         "- 时间：%s → %s（%s）"
         % (
-            datetime.fromtimestamp(t0 / 1000).strftime("%Y-%m-%d %H:%M") if t0 else "?",
-            datetime.fromtimestamp(t1 / 1000).strftime("%H:%M") if t1 else "?",
+            datetime.fromtimestamp(min(ts) / 1000).strftime("%Y-%m-%d %H:%M") if ts else "?",
+            datetime.fromtimestamp(max(ts) / 1000).strftime("%H:%M") if ts else "?",
             dur or "?",
         ),
-        "- 回合：用户 %d / 助手 %d" % (turns["user"], turns["assistant"]),
-        "- 工具调用：%d 次，其中失败或报错 %d 次" % (calls, fails),
-        "- 用户被问到选择：%d 次" % asked,
-        "- 落盘文件：%d 个" % len(seen),
+        "- 回合：用户 %d / 助手 %d" % (st["user"], st["assistant"]),
+        "- 工具调用：%d 次，其中失败或报错 %d 次" % (st["calls"], st["fails"]),
+        "- 用户被问到选择：%d 次" % st["asked"],
+        "- 落盘文件：%d 个" % len(st["writes"]),
     ]
-    if seen:
-        head.append("")
-        head.append("**产出物**")
-        for p in seen[:20]:
-            head.append("- `%s`" % p)
-    head += [
-        "",
-        "> 读法：失败次数和「用户被问到选择」的次数，是判断这段素材有没有「承」和「转」的第一手证据。",
-        "> 一次都没失败、也没被问过的会话，通常没有转折，故事要按「顺风局」的方式重写。",
-        "",
-        "---",
-    ]
-    return "\n".join(head) + "\n" + "\n".join(body) + "\n"
+    if st["writes"]:
+        out.append("")
+        out.append("**产出物**")
+        for p in st["writes"][:20]:
+            out.append("- `%s`" % p)
+
+    if not st["fails"] and not st["asked"]:
+        out += [
+            "",
+            "> ⚠ 这次会话没有失败、也没有把选择权交给用户，大概率一路顺风。",
+            "> 也就是说它没有真正的「承」和「转」——别硬写起承转合，考虑清单体",
+            "> （见 references/story-shapes.md 末节）。",
+        ]
+    else:
+        out += [
+            "",
+            "> 读法：失败次数和「用户被问到选择」的次数，是判断这段素材有没有",
+            "> 「承」和「转」的第一手证据。",
+        ]
+
+    out += ["", "---"]
+    return "\n".join(out)
+
+
+def render_turns(turns, brief=False, max_text=1400, max_result=420):
+    out = []
+    for i, t in enumerate(turns, 1):
+        clock = ""
+        if isinstance(t.get("ts"), (int, float)):
+            clock = datetime.fromtimestamp(t["ts"] / 1000).strftime("%H:%M")
+        who = "用户" if t["role"] == "user" else "助手"
+
+        if brief:
+            body = clip(t["text"], 900 if t["role"] == "user" else 240)
+        else:
+            body = clip(t["text"], max_text)
+
+        calls = [e for e in t["events"] if e["kind"] == "call"]
+        results = [e for e in t["events"] if e["kind"] == "result"]
+        fails = [e for e in results if e.get("failed")]
+
+        if body:
+            out.append("\n### %d · %s %s\n\n%s" % (i, who, clock, body))
+
+        if brief:
+            # keep only what a story consumes: failures, decisions, writes
+            kept = []
+            if body and calls:
+                kept.append("  - 本轮 %d 次工具调用" % len(calls))
+            for e in fails:
+                kept.append("  - ← ✗失败 %s %s" % (e["name"], clip(e["text"], 300)))
+            for idx, e in enumerate(calls):
+                if e["name"] in DECISION_TOOLS:
+                    r = results[idx] if idx < len(results) else None
+                    kept.append("  - ◆ 决策点 %s" % clip(r["text"] if r else e["args"], 260))
+                elif e["name"] in WRITE_TOOLS:
+                    try:
+                        a = json.loads(e["args"])
+                        p = a.get("file_path") or a.get("path") or ""
+                        kept.append("  - ✎ %s %s" % (e["name"], clip(p, 120)))
+                    except Exception:
+                        pass
+            if kept:
+                out.extend(kept)
+            continue
+
+        for e in t["events"]:
+            if e["kind"] == "call":
+                note = SIGNAL_MARKS.get(e["name"], "")
+                out.append("  - → `%s`%s %s"
+                           % (e["name"], (" · " + note) if note else "", clip(e["args"], 160)))
+            else:
+                flag = "✗失败" if e.get("failed") else "✓"
+                out.append("  - ← %s %s %s"
+                           % (flag, e["name"], clip(e["text"], max_result)))
+    return "\n".join(out)
+
+
+def cut_middle(text, ceiling):
+    """Keep both ends; the middle is where tool spam piles up."""
+    if len(text) <= ceiling:
+        return text
+    head = int(ceiling * 0.62)
+    tail = max(0, ceiling - head - 300)
+    return (
+        text[:head]
+        + "\n\n[...中间省略 %d 字。用 --grep <关键词> 定位具体片段，或开 --brief 重跑...]\n\n"
+        % (len(text) - head - tail)
+        + (text[-tail:] if tail else "")
+    )
+
+
+def digest(path, brief=False, grep=None, max_text=1400, max_chars=None):
+    turns = parse(path)
+    st = stats(turns)
+
+    note = ""
+    if grep:
+        pat = re.compile(re.escape(grep), re.I)
+        keep = set()
+        for i, t in enumerate(turns):
+            hay = t["text"] + " " + " ".join(
+                (e.get("args") or "") + " " + (e.get("text") or "") for e in t["events"]
+            )
+            if pat.search(hay):
+                keep.update({i - 1, i, i + 1})
+        picked = [t for i, t in enumerate(turns) if i in keep]
+        note = "\n> 已按关键词 `%s` 过滤：%d / %d 轮命中（含前后各一轮）。\n" % (
+            grep, len(picked), len(turns))
+        turns = picked
+    elif not brief and not max_chars:
+        size = sum(len(t["text"]) for t in turns) + sum(
+            len(e.get("args") or "") + len(e.get("text") or "")
+            for t in turns for e in t["events"])
+        if size > 120000:
+            note = ("\n> ⚠ 原始素材约 %d 字，直接读会吃掉大量上下文。"
+                    "建议加 `--brief` 先看骨架，再用 `--grep` 钻细节。\n" % size)
+
+    text = header(path, turns, st) + note + "\n" + render_turns(
+        turns, brief=brief, max_text=max_text)
+    if max_chars:
+        text = cut_middle(text, max_chars)
+    return text
 
 
 # ---------------------------------------------------------------- redaction
@@ -267,8 +388,8 @@ def scan(path):
         found = sorted(found, key=len, reverse=True)
 
         if label == "绝对路径":
-            # 116 paths is unreadable; group by parent dir so the user can
-            # approve a folder in one glance instead of reading every file.
+            # a hundred paths is unreadable; group by parent dir so the user can
+            # approve a folder in one glance instead of reading every file
             groups = {}
             for v in found:
                 parent = os.path.dirname(v) or v
@@ -302,6 +423,11 @@ def main():
     ap.add_argument("--latest", action="store_true", help="newest session of this project")
     ap.add_argument("--cwd", help="workspace dir (default: current)")
     ap.add_argument("--list", action="store_true", help="list recent sessions and exit")
+    ap.add_argument("--brief", action="store_true",
+                    help="compact mode: user turns full, assistant turns short, "
+                         "tool calls collapsed, failures/decisions/writes kept")
+    ap.add_argument("--grep", help="only turns containing this text, plus one neighbour")
+    ap.add_argument("--max-chars", type=int, help="hard ceiling; cuts from the middle")
     ap.add_argument("--scan", action="store_true", help="also scan for sensitive strings")
     ap.add_argument("--out", help="write to this file instead of stdout")
     ap.add_argument("--max-text", type=int, default=1400)
@@ -315,12 +441,14 @@ def main():
     if not path or not os.path.exists(path):
         sys.exit("找不到会话文件。先跑 `--list` 看看有哪些。")
 
-    text = digest(path, max_text=args.max_text)
+    text = digest(path, brief=args.brief, grep=args.grep,
+                  max_text=args.max_text, max_chars=args.max_chars)
     if args.scan:
         text += "\n\n" + scan(path)
 
     if args.out:
-        os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
+        d = os.path.dirname(os.path.abspath(args.out))
+        os.makedirs(d, exist_ok=True)
         open(args.out, "w", encoding="utf-8").write(text)
         print("已写入 %s（%d 字）" % (args.out, len(text)))
     else:

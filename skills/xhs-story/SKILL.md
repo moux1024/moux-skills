@@ -3,7 +3,7 @@ name: xhs-story
 description: Turn a real "idea → shipped" process into a Xiaohongshu (小红书 / rednote) image carousel -- 7 pages at 1242x1660 plus a paste-ready caption -- structured as 起承转合. Reads WorkBuddy session transcripts to recover what actually happened (tool calls, failures, retries, the moment the question changed), and also accepts dictation or local documents as source material. All Chinese text is rendered by CSS + headless Chrome, never by an image model. Use when the user wants to post a session to 小红书, write a build log as social content, explain how an idea was shipped with WorkBuddy, or says 做个小红书图文.
 description_zh: "把一个「想法→落地」的真实过程,按起承转合编排成小红书图文(7张3:4图 + 可直接粘贴的文案)"
 description_en: "Turn a real build process into a 起承转合 Xiaohongshu image carousel with paste-ready caption"
-version: 1.0.0
+version: 1.1.0
 allowed-tools: Read,Write,Edit,Bash,Glob,Grep,ViewImage
 ---
 
@@ -63,10 +63,6 @@ L1 的独家价值：**失败与反复**。这是「承」和「转」唯一的�
 # 当前/最近一次会话
 python3 scripts/extract_session.py --latest --out xhs-<slug>/source.md
 
-# 历史会话：先列出来挑
-python3 scripts/extract_session.py --list
-python3 scripts/extract_session.py --session <path.jsonl> --out ...
-
 # 顺带扫敏感项
 python3 scripts/extract_session.py --latest --scan
 ```
@@ -76,6 +72,43 @@ python3 scripts/extract_session.py --latest --scan
 会话里出现过的图片存在 `~/.workbuddy/blobs/`，transcript 的 `image_blob_ref.blob_path` 里有绝对路径——需要「合」页的真截图时先去那里翻，比重新截一次更真。
 
 用户只给了口述或文档（L3/L4）时跳过这步，但在 storyboard 里标注级别。
+
+#### 用历史会话（最常见的情况）
+
+**先记住一个坑**：`--latest` 取的是「当前 cwd 所属项目里最新的会话」。你在一个新会话里说「把上周那个项目做成小红书」，`--latest` 会指向**你现在这个新会话**，不是上周那个。所以历史会话必须显式指定路径。
+
+```bash
+# 1. 先看有哪些（跨所有项目，按修改时间倒序）
+python3 scripts/extract_session.py --list
+
+# 2. 认出目标后，用路径直接指定
+python3 scripts/extract_session.py --session <上面列出的 .jsonl> --brief --out xhs-<slug>/source.md
+```
+
+`--list` 里那列大小是重要指示器。**超过 150 KB 的会话直接上 `--brief`**，别先看全量：
+
+| 会话规模 | 全量抽取 | 该怎么做 |
+|---|---|---|
+| < 150 KB | 几千到两万字 | 全量读，`--out` 落盘 |
+| 150 KB – 1 MB | 几万到十几万字 | `--brief` |
+| > 1 MB | 可达 45 万字（约 22 万 token） | `--brief` + `--max-chars 30000` |
+
+**实测**：一个 11 MB 的会话，全量抽出来 45 万字，塞不进任何上下文；`--brief` 压到 6.5 万字，丢掉 86% 的噪声但**保住全部 44 次失败和 2 个决策点**——正是「承」和「转」要用的东西。
+
+三档降级，按需要往下走：
+
+```bash
+# 骨架：用户话全留，助手话截短，工具调用折叠成计数，只保留失败/决策/写文件
+--brief
+
+# 定位某个瞬间（含前后各一轮），适合挖「转」的证据
+--grep "报错" --brief
+
+# 硬上限，从中间砍（两端保留），兜底用
+--max-chars 30000
+```
+
+`--grep` 单独用会把命中的所有轮次全量渲染，命中多时反而更大；**它该和 `--brief` 或 `--max-chars` 连用**。
 
 ### Step 1 · 抽零件
 
@@ -183,6 +216,8 @@ python3 scripts/render.py --check     # 确认 Chrome 可用
 | 文字溢出画面 | 缩短文字。**不要**靠调小字号硬塞，14px 字在小红书上等于没写 |
 | 找不到真截图 | 用 `shot` 页的空态（虚线占位），在 caption 里说明「截图待补」；不要换 AI 效果图 |
 | 素材是 L3/L4，没有过程 | 换清单体（`references/story-shapes.md` 末节），别硬套起承转合 |
+| `--latest` 抽到的不是目标会话 | 它取的是当前 cwd 项目里最新的会话。历史会话一律走 `--list` + `--session <路径>` |
+| 历史会话太大，抽出来读不动 | 上 `--brief`；还不够就加 `--grep "关键词" --brief` 或 `--max-chars 30000` |
 
 ---
 
