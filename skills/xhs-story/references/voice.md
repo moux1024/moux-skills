@@ -84,7 +84,7 @@
 
 ```
 已脱敏：
-- /Users/moux/WorkBuddy/... → 我的电脑
+- /Users/你/项目/... → 我的电脑
 - xxx@mail.com → 已删除
 未改动：xhs-story（项目名，保留）
 ```
