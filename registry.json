@@ -34,5 +34,14 @@
     "path": "skills/novel-atlas",
     "version": "0.2.0",
     "tags": ["novel", "visualization", "image", "infographic"]
+  },
+  {
+    "id": "xhs-story",
+    "name": "XHS Story",
+    "description": "Turns a real idea-to-shipped process into a 7-page Xiaohongshu (rednote) image carousel with a paste-ready caption, structured as 起承转合. Recovers authentic detail from session transcripts and renders all Chinese text with CSS + headless Chrome instead of an image model.",
+    "repo": "moux1024/moux-skills",
+    "path": "skills/xhs-story",
+    "version": "1.0.0",
+    "tags": ["xiaohongshu", "rednote", "content", "social", "carousel"]
   }
 ]
