@@ -31,6 +31,14 @@ PRIMITIVE_COLORS = {
 BLACK_TEXT = (18, 18, 18)
 WHITE_TEXT = (245, 242, 236)
 
+# Default annotation treatment: every label sits on its own opaque plate, black on white,
+# below the thing it names. Measured scrims (`meta.label_plate: "tone"`) are still available,
+# but they are the exception: a label that has to win a contrast fight with the artwork is a
+# label that disappears the first time the picture is viewed at 25%.
+PLATE_BG = (255, 255, 255)
+PLATE_INK = (23, 22, 21)
+PLATE_BORDER = (23, 22, 21, 48)
+
 
 # ------------------------------------------------------------------ blueprint
 
@@ -197,19 +205,163 @@ def cartouche_geometry(bp, cell, W, H, draw):
 
 # ------------------------------------------------------------------ label geometry
 
-def _anchor_box(draw, text, px, py, size, anchor):
-    font = resolve_font(max(10, int(size)))
+def plate_mode(bp):
+    """`"white"` (default) or `"tone"` (measured scrim, the pre-0.3 behaviour)."""
+    v = str((bp.get("meta") or {}).get("label_plate", "white")).lower()
+    return "tone" if v in ("tone", "tonal", "scrim") else "white"
+
+
+def text_box(draw, text, px, py, size, anchor="lt"):
+    """The plate a string occupies, and where its glyphs start.
+
+    One implementation, because Gate 2 and the stitcher have to agree on this or the layout
+    the user approves is not the layout that ships. Anchors:
+      lt  left-top      — plate grows right and down from the point
+      ct  centre-top    — horizontally centred on the point, grows down
+      cb  centre-below  — centred under the point, with a gap: the default, so a label
+                          hangs beneath its subject instead of sitting on top of it
+      lm  left-middle   — vertically centred on the point, grows right
+      rm  right-middle  — vertically centred on the point, grows left
+    """
+    size = max(10, int(round(size)))
+    font = resolve_font(size)
     tw = text_width(draw, text, font)
     th = int(size * 1.32)
+    pad_x, pad_y = int(round(size * 0.42)), int(round(size * 0.22))
+    gap = int(round(size * 0.45))
     if anchor == "ct":
-        x0 = px - tw / 2.0
-        y0 = py
+        x0, y0 = px - tw / 2.0, py
+    elif anchor == "cb":
+        x0, y0 = px - tw / 2.0, py + gap
     elif anchor == "lm":
         x0, y0 = px, py - th / 2.0
+    elif anchor == "rm":
+        x0, y0 = px - tw, py - th / 2.0
     else:
         x0, y0 = px, py
-    pad_x, pad_y = size * 0.42, size * 0.20
-    return (x0 - pad_x, y0 - pad_y, x0 + tw + pad_x, y0 + th + pad_y)
+    box = (int(x0 - pad_x), int(y0 - pad_y),
+           int(x0 + tw + pad_x), int(y0 + th + pad_y))
+    return {"box": box, "text_pos": (int(x0), int(y0)), "font": font, "size": size,
+            "tw": tw, "th": th, "pad_x": pad_x, "pad_y": pad_y}
+
+
+
+def _anchor_box(draw, text, px, py, size, anchor):
+    return text_box(draw, text, px, py, size, anchor)["box"]
+
+
+def zone_caption_geometry(bp, zone, cell, draw, avoid=None):
+    """A zone's name and caption as one plate under the picture.
+
+    The caption is part of the layout, not an afterthought: it is the one piece of
+    editorial prose the reader sees, and it is painted on the same artwork as everything
+    else. `meta.zone_caption_side` selects `"bottom"` (default — the plate hangs below the
+    picture, the way a caption belongs under a plate) or `"top"` (the old header band).
+
+    `avoid` is the title block's rect. A caption that lands under it would be painted over,
+    so it flips to the top of its zone and says so (`flipped`), rather than colliding with
+    the one block on the canvas that is guaranteed to be painted last. Both the skeleton and
+    the stitcher call this with the same rect, so the band the user approves at Gate 2 is
+    the band that ships.
+    """
+    x, y, w, h = zone_rect(zone, cell)
+    f_name = resolve_font(max(10, int(round(62 * cell / 2048.0))))
+    f_cap = resolve_font(max(10, int(round(30 * cell / 2048.0))))
+    pad_x = int(round(f_name.size * 0.42))
+    pad_y = int(round(f_name.size * 0.22))
+    margin = int(round(w * 0.022))
+    max_text_w = int(w * 0.78) - 2 * pad_x
+
+    lines = []
+    if zone.get("name") and not zone.get("hide_name"):
+        lines.append((str(zone["name"]), f_name, "name"))
+    if zone.get("caption"):
+        for sub in wrap_cjk(draw, str(zone["caption"]), f_cap, max_text_w)[:3]:
+            lines.append((sub, f_cap, "caption"))
+    if not lines:
+        return None
+
+    block_w = max(text_width(draw, t, f) for t, f, _ in lines) + 2 * pad_x
+    line_h = [int(f.size * (1.34 if kind == "name" else 1.52)) for _, f, kind in lines]
+    total_h = sum(line_h) + 2 * pad_y
+
+    side = str(zone.get("caption_side")
+               or (bp.get("meta") or {}).get("zone_caption_side", "bottom")).lower()
+    left = x + margin
+    top = (y + margin) if side == "top" else (y + h - margin - total_h)
+    rect = (left, top, left + block_w, top + total_h)
+
+    flipped = False
+    if avoid is not None and side != "top" and rects_overlap(rect, tuple(avoid)):
+        top = y + margin
+        rect = (left, top, left + block_w, top + total_h)
+        flipped = True
+
+    placed = []
+    cy = top + pad_y
+    for (text, font, kind), lh in zip(lines, line_h):
+        placed.append((text, font, kind, cy))
+        cy += lh
+
+    return {"rect": rect, "lines": placed, "pad": pad_x, "side": side, "flipped": flipped}
+
+
+def cartouche_rect(bp, cell, draw=None):
+    """The title block's footprint at this cell, for callers that must steer around it."""
+    W, H = canvas_size(bp)
+    d = draw or ImageDraw.Draw(Image.new("RGB", (4, 4)))
+    return cartouche_geometry(bp, cell, W, H, d)["rect"]
+
+
+
+def event_label_pos(draw, text, ex, ey, cell, zrect, avoid=None, taken=None, prefer="below"):
+    """Where an event's label goes. First fit wins: below, above, right, left.
+
+    Below is the default because a label above the dot covers the thing the dot is pointing
+    at. But a dense cluster of events — or a legend block at the bottom of the panel — can
+    leave no room below and no room above, and the honest answer there is the side, not a
+    second overlap. `label_side` on the event puts one side first; the rest stay as fallbacks.
+
+    The dot stays the anchor in every case; only the side the plate hangs on changes, so the
+    leader line still points at something. `avoid` / `taken` are rects (or lists of them) the
+    plate must not land on: the zone caption, the title block, and the plates already placed.
+    """
+    size = cell * 0.020
+    r = cell * 0.016
+    gap = int(round(size * 0.30))
+    th = int(size * 1.32)
+    zx, zy, zw, zh = zrect
+    blocks = _as_rects(avoid) + _as_rects(taken)
+
+    sides = {
+        "below": (ex, ey + r + gap, "cb"),
+        "above": (ex, ey - r - gap - th, "ct"),
+        "right": (ex + r + gap, ey, "lm"),
+        "left": (ex - r - gap, ey, "rm"),
+    }
+    order = [prefer] + [k for k in ("below", "above", "right", "left") if k != prefer]
+
+    fallback = None
+    for side in order:
+        if side not in sides:
+            continue
+        px, py, anchor = sides[side]
+        box = text_box(draw, text, px, py, size, anchor)["box"]
+        if fallback is None:
+            fallback = (px, py, anchor)
+        inside = (box[0] >= zx and box[2] <= zx + zw
+                  and box[1] >= zy and box[3] <= zy + zh)
+        if inside and not any(rects_overlap(box, b) for b in blocks):
+            return px, py, anchor
+    return fallback
+
+
+def _as_rects(value):
+    if not value:
+        return []
+    if isinstance(value[0], (list, tuple)):
+        return [tuple(r) for r in value]
+    return [tuple(value)]
 
 
 def label_boxes(bp, cell):
@@ -220,21 +372,18 @@ def label_boxes(bp, cell):
     collisions (two labels 93px apart) and missed real ones (a name plate sitting on an
     event's tail), so Gate 2 approved a layout the stitcher then broke.
 
-    Returns [(zone_id, kind, text, rect)], kind ∈ zone/caption/label/event/name.
+    Returns [(zone_id, kind, text, rect)], kind ∈ caption/label/event/name.
     """
     draw = ImageDraw.Draw(Image.new("RGB", (4, 4)))
     out = []
+    cart = cartouche_rect(bp, cell, draw)
 
     for z in bp["zones"]:
         x, y, w, h = zone_rect(z, cell)
-        if not z.get("hide_name") and z.get("name"):
-            out.append((z["id"], "zone", str(z["name"]),
-                        _anchor_box(draw, str(z["name"]), x + w * 0.026, y + h * 0.020,
-                                    62 * cell / 2048.0, "lt")))
-        if z.get("caption"):
-            out.append((z["id"], "caption", str(z["caption"]),
-                        _anchor_box(draw, str(z["caption"]), x + w * 0.028, y + h * 0.074,
-                                    30 * cell / 2048.0, "lt")))
+        cap = zone_caption_geometry(bp, z, cell, draw, avoid=cart)
+        if cap:
+            out.append((z["id"], "caption",
+                        " / ".join(str(t) for t, _, _, _ in cap["lines"]), cap["rect"]))
         for lb in z.get("labels") or []:
             text = str(lb.get("text", ""))
             if not text:
@@ -244,22 +393,7 @@ def label_boxes(bp, cell):
                                     x + float(lb.get("x", 0.5)) * w,
                                     y + float(lb.get("y", 0.5)) * h,
                                     float(lb.get("size", 40)) * cell / 2048.0,
-                                    lb.get("anchor", "lt"))))
-
-    zones = zone_by_id(bp)
-    for e in bp.get("events", []):
-        z = zones.get(e.get("zone"))
-        if not z:
-            continue
-        if not str(e.get("label", "")).strip():
-            continue        # an empty label paints no plate; its dot is not a collision
-        x, y, w, h = zone_rect(z, cell)
-        ex = x + float(e.get("x", 0.5)) * w
-        ey = y + float(e.get("y", 0.5)) * h
-        ef = cell * 0.020
-        out.append((z["id"], "event", str(e.get("label", "")),
-                    _anchor_box(draw, str(e.get("label", "")),
-                                ex + ef * 0.75, ey - ef * 0.55, ef, "lt")))
+                                    lb.get("anchor", "cb"))))
 
     chidx = chars_by_id(bp)
     for z in bp["zones"]:
@@ -267,19 +401,11 @@ def label_boxes(bp, cell):
         for cid in z.get("characters") or []:
             ch = chidx.get(cid) or {}
             box = (ch.get("portrait") or {}).get("box")
-            name = str(ch.get("name", cid))
             if not box or len(box) != 4:
-                # faceless characters get their name at prop_at instead — the same plate
-                # stitch.py paints, so the collision pass sees it too
-                if ch.get("faceless") and ch.get("prop_at"):
-                    ppx, ppy = float(ch["prop_at"][0]), float(ch["prop_at"][1])
-                    out.append((z["id"], "name", name,
-                                _anchor_box(draw, name, x + ppx * w,
-                                            y + ppy * h + cell * 0.042,
-                                            30 * cell / 2048.0, "ct")))
                 continue
             bx, by = x + float(box[0]) * w, y + float(box[1]) * h
             bw, bh = float(box[2]) * w, float(box[3]) * h
+            name = str(ch.get("name", cid))
             out.append((z["id"], "name", name,
                         _anchor_box(draw, name, bx + bw * 0.5, by + bh + cell * 0.012,
                                     30 * cell / 2048.0, "ct")))
@@ -292,6 +418,26 @@ def label_boxes(bp, cell):
             out.append((z["id"], "name", name,
                         _anchor_box(draw, name, cx, cy + size / 2 + cell * 0.010,
                                     26 * cell / 2048.0, "ct")))
+
+    # Events last: which side a label hangs on depends on what is already on the panel,
+    # so they are placed against the plates above rather than in blueprint order alone.
+    zones = zone_by_id(bp)
+    taken = [r[3] for r in out]
+    for e in bp.get("events", []):
+        z = zones.get(e.get("zone"))
+        if not z:
+            continue
+        zrect = zone_rect(z, cell)
+        ex = zrect[0] + float(e.get("x", 0.5)) * zrect[2]
+        ey = zrect[1] + float(e.get("y", 0.5)) * zrect[3]
+        text = str(e.get("label", ""))
+        zc = zone_caption_geometry(bp, z, cell, draw, avoid=cart)
+        avoid = [cart] + ([zc["rect"]] if zc else [])
+        px, py, anchor = event_label_pos(draw, text, ex, ey, cell, zrect, avoid, taken,
+                                       e.get("label_side", "below"))
+        box = _anchor_box(draw, text, px, py, cell * 0.020, anchor)
+        out.append((z["id"], "event", text, box))
+        taken.append(box)
     return out
 
 

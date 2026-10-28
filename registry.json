@@ -32,7 +32,7 @@
     "description": "Turns a full novel into one ultra-high-resolution atlas image holding its timeline, cast and irreversible events: designs a blueprint of tiled zones, generates one image per zone, then composites tiles and text into a single picture locally.",
     "repo": "moux1024/moux-skills",
     "path": "skills/novel-atlas",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "tags": ["novel", "visualization", "image", "infographic"]
   },
   {

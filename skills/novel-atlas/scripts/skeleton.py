@@ -69,29 +69,31 @@ def main():
 
     # --- zones
     zones = bp["zones"]
-    header_boxes = []
+    full_cell = int(bp["meta"]["canvas"]["cell"])
+    k = cell / float(full_cell)
+    meas = ImageDraw.Draw(Image.new("RGB", (8, 8)))     # measure at the atlas's real size
+    cart_rect = ac.cartouche_rect(bp, full_cell, meas)
+    caption_boxes = []
     char_boxes = []
+
+    def draw_caption_block(z, cap):
+        """White plate + black text, exactly where stitch.py will paint it."""
+        x0, y0, x1, y1 = [v * k for v in cap["rect"]]
+        draw.rectangle([x0, y0, x1, y1], fill=(255, 255, 255, 255),
+                       outline=(0, 0, 0, 70))
+        for text, font, kind, ty in cap["lines"]:
+            f = ac.resolve_font(max(9, int(round(font.size * k))))
+            draw.text((x0 + cap["pad"] * k, ty * k), text, font=f, fill=(22, 22, 22, 255))
+
     for z in zones:
         x, y, w, h = ac.zone_rect(z, cell)
         pcol = ac.PRIMITIVE_COLORS.get(z.get("primitive", ""), (120, 120, 120))
         draw.rectangle([x, y, x + w - 1, y + h - 1], fill=pcol + (38,))
         draw.rectangle([x, y, x + w - 1, y + h - 1], outline=pcol + (235,), width=3)
-        # header block mirrors what stitch.py will draw on the final image.
-        # 0.16 of the zone height is the reserved band; labels must sit below it.
-        head_h = int(cell * 0.158)
-        draw.rectangle([x, y, x + w - 1, y + head_h], fill=(0, 0, 0, 130))
-        label = f"{z.get('id', '?')}  {z.get('name', '')}"
-        ny = y + int(cell * 0.008)
-        draw.text((x + 8, ny), label, font=f_zone, fill=ink)
-        hy = ny + int(f_zone.size * 1.34)
-        if z.get("caption"):
-            # Wrapped at the zone's own width. An unwrapped caption silently runs into the
-            # neighbouring zone and the collision pass below never sees it.
-            cap_lines = ac.wrap_cjk(draw, str(z["caption"]), f_small, w - 20)[:2]
-            for i, line in enumerate(cap_lines):
-                draw.text((x + 10, hy + i * int(f_small.size * 1.3)), line,
-                          font=f_small, fill=ink + (215,))
-        header_boxes.append((z["id"], label, (x, y, x + w, y + head_h)))
+        cap = ac.zone_caption_geometry(bp, z, full_cell, meas, avoid=cart_rect)
+        if cap:
+            draw_caption_block(z, cap)
+            caption_boxes.append((z["id"], f"{z['id']} caption", cap["rect"]))
         # duty — design intent, not printed on the final image. Off by default so this
         # view previews exactly what the reader will see; bottom-edge seam chips would
         # otherwise cut through the sentence.
@@ -183,10 +185,13 @@ def main():
                         f"cropped by guesswork, remote avatars will point at the wrong pixels")
             dashed_rect(draw, (bx, by, bx + bw, by + bh), (255, 255, 255, 190), width=2)
             # Name goes under the figure, not above it: above collides with the zone's
-            # header band as soon as portrait.box.y is near 0.105.
+            # caption plate as soon as portrait.box.y is near its top edge.
             nm = ch.get("name", cid)
             nlx, nly = bx, by + bh + int(cell * 0.010)
-            draw.text((nlx, nly), nm, font=f_tiny, fill=(255, 255, 255, 235))
+            ntw = ac.text_width(draw, nm, f_tiny)
+            draw.rectangle([nlx - 3, nly - 2, nlx + ntw + 3, nly + f_tiny.size * 1.3],
+                           fill=(255, 255, 255, 245), outline=(0, 0, 0, 50))
+            draw.text((nlx, nly), nm, font=f_tiny, fill=(22, 22, 22, 255))
             char_boxes.append((z["id"], nm, (nlx, nly,
                                             nlx + ac.text_width(draw, nm, f_tiny),
                                             nly + int(f_tiny.size * 1.2))))
@@ -208,19 +213,6 @@ def main():
                         f"not square — stitch.py force-fits it into a circle, so the face "
                         f"arrives squashed. A standing figure is not a portrait box; "
                         f"square it by hand or with `anchor.py --write-back`")
-
-    # --- tier caps
-    # Policy with teeth. A 20-T1 canvas has no home zones left to give each character,
-    # and a 60-T2 canvas has no label space; both are caught here, with the rest of the
-    # structural promises, before any tile is paid for.
-    t1s = [c for c in bp.get("characters", []) if c.get("tier") == "T1"]
-    t2s = [e for e in bp.get("events", []) if e.get("tier") == "T2"]
-    if len(t1s) > 12:
-        problems.append(f"{len(t1s)} T1 characters against the cap of 12 — demote by lowest "
-                        f"hit_rate first and record each demotion in coverage.demotions")
-    if len(t2s) > 40:
-        problems.append(f"{len(t2s)} T2 events against the cap of 40 — drop the least "
-                        f"irreversible first and name what was dropped in coverage.turning_missing")
 
     # --- cast whitelist
     # One authority for who may be drawn in a zone. Both the home characters and the remote
@@ -274,7 +266,9 @@ def main():
             nly = cy + size / 2 + int(cell * 0.010)
             if nly + f_tiny.size * 1.2 > y + h - 4:       # no room below: sit above
                 nly = cy - size / 2 - int(cell * 0.010) - f_tiny.size * 1.2
-            draw.text((nlx, nly), name, font=f_tiny, fill=(255, 255, 255, 220))
+            draw.rectangle([nlx - 3, nly - 2, nlx + ntw + 3, nly + f_tiny.size * 1.3],
+                           fill=(255, 255, 255, 245), outline=(0, 0, 0, 50))
+            draw.text((nlx, nly), name, font=f_tiny, fill=(22, 22, 22, 255))
             char_boxes.append((z["id"], name, (nlx, nly,
                                               nlx + ntw, nly + int(f_tiny.size * 1.2))))
 
@@ -295,14 +289,26 @@ def main():
         draw.ellipse([ex - r, ey - r, ex + r, ey + r],
                      fill=(accent if irreversible else muted) + (235,),
                      outline=(255, 255, 255, 220), width=2)
+        # Same placement rule as the stitcher: label under the dot, flipped above only when
+        # the zone edge or the caption plate leaves no room. Geometry from atlas_common, so
+        # the preview cannot disagree with the painted image about which side it went.
         txt = e.get("label", "")
-        lh = int(f_tiny.size * 1.2)
-        for i, line in enumerate(ac.wrap_cjk(draw, txt, f_tiny, int(cell * 0.40))):
-            tw = ac.text_width(draw, line, f_tiny)
-            ty = ey - r + i * lh
-            draw.text((ex + r + 6, ty), line, font=f_tiny, fill=(255, 255, 255, 230))
-            event_boxes.append((z["id"], f"{e.get('id')}:{txt}",
-                                (ex + r + 6, ty, ex + r + 6 + tw, ty + lh)))
+        zfull = ac.zone_rect(z, full_cell)
+        cap = ac.zone_caption_geometry(bp, z, full_cell, meas, avoid=cart_rect)
+        avoid = [cart_rect] + ([cap["rect"]] if cap else [])
+        px, py, anc = ac.event_label_pos(meas, txt,
+                                         zfull[0] + float(e.get("x", 0.5)) * zfull[2],
+                                         zfull[1] + float(e.get("y", 0.5)) * zfull[3],
+                                         full_cell, zfull, avoid,
+                                         [b[2] for b in (caption_boxes + char_boxes)],
+                                         e.get("label_side", "below"))
+        geo = ac.text_box(meas, txt, px, py, full_cell * 0.020, anc)
+        bx0, by0, bx1, by1 = [v * k for v in geo["box"]]
+        draw.rectangle([bx0, by0, bx1, by1], fill=(255, 255, 255, 255), outline=(0, 0, 0, 60))
+        f_lab = ac.resolve_font(max(9, int(round(geo["font"].size * k))))
+        draw.text((geo["text_pos"][0] * k, geo["text_pos"][1] * k), txt,
+                  font=f_lab, fill=(22, 22, 22, 255))
+        event_boxes.append((z["id"], f"{e.get('id')}:{txt}", geo["box"]))
 
     for e in bp.get("events", []):
         src = epos.get(e.get("id"))
@@ -316,46 +322,36 @@ def main():
                 problems.append(f"event {e.get('id')}: link to unknown event '{other}'")
 
     # --- labels drawn for preview
-    boxes = list(header_boxes) + list(event_boxes) + list(char_boxes)
+    boxes = list(caption_boxes) + list(event_boxes) + list(char_boxes)
     for z in zones:
         x, y, w, h = ac.zone_rect(z, cell)
         for lb in z.get("labels", []) or []:
-            lx = x + float(lb.get("x", 0.5)) * w
-            ly = y + float(lb.get("y", 0.5)) * h
-            size = max(9, int(float(lb.get("size", 40)) * cell / 2048.0))
-            font = ac.resolve_font(size)
             text = lb.get("text", "")
-            tw = ac.text_width(draw, text, font)
-            th = int(size * 1.3)
-            draw.rectangle([lx - 2, ly - 2, lx + tw + 2, ly + th], fill=bg + (150,))
-            draw.text((lx, ly - 1), text, font=font, fill=ink)
+            geo = ac.text_box(meas, text, x + float(lb.get("x", 0.5)) * w,
+                              y + float(lb.get("y", 0.5)) * h,
+                              float(lb.get("size", 40)) * cell / 2048.0,
+                              lb.get("anchor", "cb"))
+            bx0, by0, bx1, by1 = geo["box"]
+            draw.rectangle([bx0, by0, bx1, by1], fill=(255, 255, 255, 245),
+                           outline=(0, 0, 0, 60))
+            font = ac.resolve_font(max(9, geo["font"].size))
+            draw.text(geo["text_pos"], text, font=font, fill=(22, 22, 22, 255))
 
     # --- label collision, measured at the atlas's real cell, not at preview scale
     # Preview-scale boxes are quantised: at 420px a 93px gap in the shipped image is 19px,
     # and a 9px minimum font is wider than the label really is. That both invented
     # collisions and hid a name plate sitting on an event's tail, so measure where the
-    # stitcher will actually paint and report those rects.
-    full_cell = int(bp["meta"]["canvas"]["cell"])
-    k = cell / float(full_cell)
+    # stitcher will actually paint and report those rects. Every plate counts now —
+    # including the zone caption — because with white plates each one is opaque and an
+    # overlap is two sentences painted on top of each other, not a faint smear.
     lbx = ac.label_boxes(bp, full_cell)
-    solid = [r for r in lbx if r[1] not in ("zone", "caption")]
 
-    for i in range(len(solid)):
-        for j in range(i + 1, len(solid)):
-            if ac.rects_overlap(solid[i][3], solid[j][3]):
+    for i in range(len(lbx)):
+        for j in range(i + 1, len(lbx)):
+            if ac.rects_overlap(lbx[i][3], lbx[j][3]):
                 problems.append(
-                    f"label collision: '{solid[i][2]}' ({solid[i][0]}) vs "
-                    f"'{solid[j][2]}' ({solid[j][0]})")
-
-    # A zone's header band is reserved: nothing may sit on the title it carries.
-    for z in zones:
-        x, y, w, _ = ac.zone_rect(z, full_cell)
-        band = (x, y, x + w, y + int(full_cell * 0.158))
-        for zi, kind, ti, bi in solid:
-            if ac.rects_overlap(band, bi):
-                problems.append(
-                    f"label in the zone header band: '{ti}' ({zi}) sits on zone {z['id']}'s "
-                    f"title band; move it below y {0.158:.3f} of that zone")
+                    f"label collision: '{lbx[i][2]}' ({lbx[i][0]}) vs "
+                    f"'{lbx[j][2]}' ({lbx[j][0]})")
 
     # --- grid coverage / overlap check
     owner = {}

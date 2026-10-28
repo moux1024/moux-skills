@@ -22,6 +22,10 @@ import atlas_common as ac  # noqa: E402
 FLOOR = 4.5
 MAX_SCRIM = 0.92
 
+# Rects that are painted after the labels (the cartouche plate). A label whose box lands
+# under one is reported, so the declared position can be moved rather than shipped cut in half.
+AVOID_RECTS = []
+
 
 def find_tile(tile_dir, zone, c, r):
     for name in (f"{zone['id']}_{c}_{r}.png", f"{c}_{r}.png",
@@ -68,18 +72,6 @@ def draw_label(canvas, draw, box, text, font, text_rgb, scrim_alpha, scrim_rgb,
                                  int(scrim_alpha * 255)))
     draw.text(text_pos, text, font=font, fill=text_rgb)
     return ac.contrast_ratio(composite, text_rgb)
-
-
-def text_plate(draw, text, font, x0, y0, pad_x, pad_y):
-    """Plate that encloses the glyphs actually drawn, not the font's advance width.
-
-    Advance width excludes the left side bearing, so plating from it always under-pads by
-    that bearing — a couple of pixels, which at label scale is a character touching the edge.
-    """
-    tx, ty = int(x0 + pad_x), int(y0 + pad_y)
-    bb = draw.textbbox((tx, ty), text, font=font)
-    box = (int(bb[0] - pad_x), int(bb[1] - pad_y), int(bb[2] + pad_x), int(bb[3] + pad_y))
-    return box, (tx, ty)
 
 
 def main():
@@ -306,80 +298,80 @@ def main():
     # The cartouche is painted last, on top of every label. Work out its footprint now so
     # that anything it would land on can be named in the report instead of silently sliced.
     cart = None if args.no_cartouche else ac.cartouche_geometry(bp, cell, W, H, draw)
+    cart_rect = cart["rect"] if cart else None
     placed_boxes = []
+    plate = ac.plate_mode(bp) == "white"
+    report["label_plate"] = "white" if plate else "tone"
 
-    def place(text, px, py, px_size, zone_id, anchor="lt", marker=None, tonal=None,
-              min_alpha=0.26):
-        font = ac.resolve_font(max(10, int(px_size)))
-        tw = ac.text_width(draw, text, font)
-        th = int(px_size * 1.32)
-        pad_x, pad_y = int(px_size * 0.42), int(px_size * 0.20)
-        if anchor == "lt":
-            ax, ay = px, py
-        elif anchor == "ct":
-            ax, ay = px - tw / 2, py
-        elif anchor == "lm":
-            ax, ay = px, py - th / 2
-        else:
-            ax, ay = px, py
+    def draw_plate(box, px_size, text=None, text_pos=None, font=None, fill_text=None):
+        radius = max(2, int(px_size * 0.24))
+        draw.rounded_rectangle(box, radius=radius, fill=ac.PLATE_BG + (255,),
+                               outline=ac.PLATE_BORDER,
+                               width=max(1, int(px_size * 0.06)))
+        if text is not None:
+            draw.text(text_pos, text, font=font, fill=fill_text or ac.PLATE_INK)
+
+    def place(text, px, py, px_size, zone_id, anchor="cb", tonal=None, min_alpha=0.26):
+        """Draw one label. Returns its plate box.
+
+        Default treatment is an opaque white plate under the point, black text: the plate is
+        the contrast, so no label depends on the artwork behind it being kind. `"tone"` keeps
+        the older measured-scrim path for builds that were designed around it.
+        """
+        geo = ac.text_box(draw, text, px, py, px_size, anchor)
+        box, text_pos = geo["box"], geo["text_pos"]
+        font = geo["font"]
 
         # Anything painted after the labels (the cartouche) has already claimed its rect.
         # A label straddling that edge is cut in half by it, so record the overlap: the
         # caller fixes it by moving the label, never by nudging it here — a marker dot and
         # the connector line that points at it are both anchored to the declared position.
-        bw_, bh_ = tw + pad_x * 2, th + pad_y * 2
-        placed_boxes.append((ax, ay, ax + bw_, ay + bh_, text))
+        placed_boxes.append((box[0], box[1], box[2], box[3], text))
 
-        box, text_pos = text_plate(draw, text, font, ax, ay, pad_x, pad_y)
-        x0, y0 = box[0], box[1]
-
-        # Label treatment is per-ZONE, not per-label: one plate direction per zone keeps the
-        # annotation layer looking drawn rather than accidental. Falls back to the
-        # least-visible plate only when the zone's declared tone cannot reach the floor.
-        forced = {"light": ((22, 22, 24), ink), "dark": (ink, (10, 10, 12))}.get(tonal)
-        chosen = None
-        if forced:
-            text_rgb, toward = forced
-            worst = ac.worst_case_rgb(canvas, box, text_rgb)
-            need, _ = ac.scrim_to_reach(worst, text_rgb, FLOOR, toward,
-                                        steps=max(5, int(MAX_SCRIM * 100) // 5))
-            if need <= MAX_SCRIM:
-                chosen = (text_rgb, toward, need, worst)
-
-        if chosen is None:
-            best = None
-            for text_rgb, toward in ((ink, (10, 10, 12)), ((22, 22, 24), ink)):
+        if plate:
+            draw_plate(box, px_size, text, text_pos, font)
+            ratio = ac.contrast_ratio(ac.PLATE_BG, ac.PLATE_INK)
+        else:
+            forced = {"light": ((22, 22, 24), ink), "dark": (ink, (10, 10, 12))}.get(tonal)
+            chosen = None
+            if forced:
+                text_rgb, toward = forced
                 worst = ac.worst_case_rgb(canvas, box, text_rgb)
                 need, _ = ac.scrim_to_reach(worst, text_rgb, FLOOR, toward,
                                             steps=max(5, int(MAX_SCRIM * 100) // 5))
-                score = need - (0.02 if text_rgb == ink else 0.0)  # tie-break to light text
-                if best is None or score < best[0]:
-                    best = (score, text_rgb, toward, need, worst)
-            _, text_rgb, toward, need, worst = best
-            if forced:
-                report["warnings"].append(
-                    f"zone {zone_id}: declared tone '{tonal}' cannot reach {FLOOR}:1 — "
-                    f"label '{text}' inverted to stay readable")
-            chosen = (text_rgb, toward, need, worst)
+                if need <= MAX_SCRIM:
+                    chosen = (text_rgb, toward, need, worst)
 
-        text_rgb, toward, need, worst = chosen
-        # A name is the one label that is always laid over a body, so the auto-scrim
-        # under-pads it: 26% reads fine on a wall and disappears on a plated torso.
-        alpha = min(max(need, min_alpha), MAX_SCRIM)
-        if marker:
-            draw.ellipse([x0 - px_size * 0.9, y0 + th * 0.18,
-                          x0 - px_size * 0.9 + px_size * 0.55, y0 + th * 0.18 + px_size * 0.55],
-                         fill=marker + (240,), outline=ink + (200,), width=2)
-        ratio = draw_label(canvas, draw, box, text, font, text_rgb, alpha, toward,
-                           pad_x, pad_y, radius=max(2, int(px_size * 0.24)),
-                           worst_backdrop=worst, text_pos=text_pos)
+            if chosen is None:
+                best = None
+                for text_rgb, toward in ((ink, (10, 10, 12)), ((22, 22, 24), ink)):
+                    worst = ac.worst_case_rgb(canvas, box, text_rgb)
+                    need, _ = ac.scrim_to_reach(worst, text_rgb, FLOOR, toward,
+                                                steps=max(5, int(MAX_SCRIM * 100) // 5))
+                    score = need - (0.02 if text_rgb == ink else 0.0)  # tie-break to light text
+                    if best is None or score < best[0]:
+                        best = (score, text_rgb, toward, need, worst)
+                _, text_rgb, toward, need, worst = best
+                if forced:
+                    report["warnings"].append(
+                        f"zone {zone_id}: declared tone '{tonal}' cannot reach {FLOOR}:1 — "
+                        f"label '{text}' inverted to stay readable")
+                chosen = (text_rgb, toward, need, worst)
+
+            text_rgb, toward, need, worst = chosen
+            # A name is the one label that is always laid over a body, so the auto-scrim
+            # under-pads it: 26% reads fine on a wall and disappears on a plated torso.
+            alpha = min(max(need, min_alpha), MAX_SCRIM)
+            ratio = draw_label(canvas, draw, box, text, font, text_rgb, alpha, toward,
+                               geo["pad_x"], geo["pad_y"], radius=max(2, int(px_size * 0.24)),
+                               worst_backdrop=worst, text_pos=text_pos)
+
         report["contrast"]["checked"] += 1
         if ratio < FLOOR:
             draw.rectangle([box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1],
                            outline=(255, 60, 60, 180), width=2)
             report["contrast"]["failures"].append(
-                {"zone": zone_id, "text": text, "ratio": round(ratio, 2),
-                 "scrim_alpha": round(alpha, 2)})
+                {"zone": zone_id, "text": text, "ratio": round(ratio, 2)})
         return box
 
     # ---------------------------------------------------------------- pass 5b: character names
@@ -394,14 +386,6 @@ def main():
                 continue
             box = (ch.get("portrait") or {}).get("box")
             if not box or len(box) != 4:
-                # A faceless character still gets its name: the skeleton showed one at
-                # prop_at, and an unnamed prop on the finished atlas reads as background
-                # furniture rather than as the character it stands for.
-                if ch.get("faceless") and ch.get("prop_at"):
-                    ppx, ppy = float(ch["prop_at"][0]), float(ch["prop_at"][1])
-                    place(str(ch.get("name", cid)), x + ppx * w, y + ppy * h + cell * 0.042,
-                          30 * cell / 2048.0, z["id"], anchor="ct", tonal=z.get("tonal"),
-                          min_alpha=0.58)
                 continue
             bx = x + float(box[0]) * w
             by = y + float(box[1]) * h
@@ -422,16 +406,39 @@ def main():
                   26 * cell / 2048.0, z["id"], anchor="ct", tonal=z.get("tonal"),
                   min_alpha=0.58)
 
-    # ---------------------------------------------------------------- pass 6: zone titles
+    # ---------------------------------------------------------------- pass 6: zone captions
+    # The name and caption of a zone are one plate under the picture, not a header band
+    # painted across the top of the artwork. `ac.zone_caption_geometry` is the single
+    # definition of where that plate lands, so Gate 2 reserves the same rectangle the
+    # stitcher fills — the previous header was drawn by skeleton.py from its own numbers,
+    # and the two disagreed often enough to approve a layout the final image then broke.
     for z in bp["zones"]:
-        if z.get("hide_name"):
+        cap = ac.zone_caption_geometry(bp, z, cell, draw, avoid=cart_rect)
+        if not cap:
             continue
-        x, y, w, h = ac.zone_rect(z, cell)
-        place(str(z.get("name", "")), x + w * 0.026, y + h * 0.020,
-              62 * cell / 2048.0, z["id"], anchor="lt", tonal=z.get("tonal"))
-        if z.get("caption"):
-            place(str(z["caption"]), x + w * 0.028, y + h * 0.074,
-                  30 * cell / 2048.0, z["id"], anchor="lt", tonal=z.get("tonal"))
+        if cap.get("flipped"):
+            report["warnings"].append(
+                f"zone {z['id']}: caption sits at the top — its bottom-left corner is under "
+                f"the title block. Set `caption_side: \"top\"` on the zone to make that "
+                f"deliberate, or move the caption in the blueprint.")
+        if plate:
+            x0, y0, x1, y1 = cap["rect"]
+            placed_boxes.append((x0, y0, x1, y1,
+                                 f"{z['id']} " + " / ".join(str(t) for t, _, _, _ in cap["lines"])))
+            draw.rounded_rectangle([x0, y0, x1, y1], radius=max(3, int(cell * 0.007)),
+                                   fill=ac.PLATE_BG + (255,), outline=ac.PLATE_BORDER,
+                                   width=max(1, cell // 1400))
+            for text, font, kind, ty in cap["lines"]:
+                draw.text((x0 + cap["pad"], ty), text, font=font, fill=ac.PLATE_INK)
+            report["contrast"]["checked"] += 1
+        else:
+            zx, zy, zw, zh = ac.zone_rect(z, cell)
+            if not z.get("hide_name") and z.get("name"):
+                place(str(z.get("name", "")), zx + zw * 0.026, zy + zh * 0.020,
+                      62 * cell / 2048.0, z["id"], anchor="lt", tonal=z.get("tonal"))
+            if z.get("caption"):
+                place(str(z["caption"]), zx + zw * 0.028, zy + zh * 0.074,
+                      30 * cell / 2048.0, z["id"], anchor="lt", tonal=z.get("tonal"))
 
     for z in bp["zones"]:
         x, y, w, h = ac.zone_rect(z, cell)
@@ -440,27 +447,36 @@ def main():
                   x + float(lb.get("x", 0.5)) * w,
                   y + float(lb.get("y", 0.5)) * h,
                   float(lb.get("size", 40)) * cell / 2048.0,
-                  z["id"], anchor=lb.get("anchor", "lt"), tonal=z.get("tonal"))
+                  z["id"], anchor=lb.get("anchor", "cb"), tonal=z.get("tonal"))
 
     if not args.no_events:
         efont = cell * 0.020
+        dot_r = int(round(cell * 0.016))
         for e in bp.get("events", []):
             pos = epos.get(e.get("id"))
             if not pos:
                 continue
             kind = e.get("kind", "event")
             mark = accent if kind == "irreversible" else muted
-            label = str(e.get("label", "")).strip()
-            if not label:
-                # No caption, still a node: the dot is the anchor the connectors point
-                # at, and placing empty text would paint a plate with nothing in it.
-                r_ = efont * 0.28
-                draw.ellipse([pos[0] - r_, pos[1] - r_, pos[0] + r_, pos[1] + r_],
-                             fill=mark + (240,), outline=ink + (200,), width=2)
-                continue
-            place(label, pos[0] + efont * 0.75, pos[1] - efont * 0.55,
-                  efont, e.get("zone"), anchor="lt", marker=mark,
-                  tonal=(zone_map.get(e.get("zone")) or {}).get("tonal"))
+            ex, ey = pos
+            # The dot marks the point the connectors end at; the label hangs under it.
+            # Before this, the dot was drawn beside the text and drifted a label-width away
+            # from the coordinate the line was actually pointing at.
+            draw.ellipse([ex - dot_r, ey - dot_r, ex + dot_r, ey + dot_r], fill=mark + (240,),
+                         outline=(255, 255, 255, 235), width=max(2, int(cell * 0.0022)))
+            z = zone_map.get(e.get("zone"))
+            zrect = ac.zone_rect(z, cell) if z else (0, 0, W, H)
+            avoid = [cart_rect] if cart_rect else []
+            if z:
+                cg = ac.zone_caption_geometry(bp, z, cell, draw, avoid=cart_rect)
+                if cg:
+                    avoid.append(cg["rect"])
+            lx, ly, anchor = ac.event_label_pos(draw, str(e.get("label", "")), ex, ey,
+                                                cell, zrect, avoid,
+                                                [b[:4] for b in placed_boxes],
+                                                e.get("label_side", "below"))
+            place(str(e.get("label", "")), lx, ly, efont, e.get("zone"), anchor=anchor,
+                  tonal=(z or {}).get("tonal"))
 
     # ---------------------------------------------------------------- label collisions
     # Labels are placed one by one, so two of them can still land on each other. Same test
@@ -490,16 +506,28 @@ def main():
         f_title, f_sub = cart["f_title"], cart["f_sub"]
         f_body, f_small = cart["f_body"], cart["f_small"]
 
-        # The plate is near-opaque black, so its own colour is what the text sits on —
-        # measure that, not the artwork, and lift the dim tone until it is legal.
-        plate_alpha = 208 / 255.0
-        worst = ac.worst_case_rgb(canvas, (cx0, cy0, cx0 + cw, cy0 + ch_), ink)
-        plane = ac.mix(worst, (0, 0, 0), plate_alpha)
-        title_rgb = ac.reach_on(plane, ink, (255, 255, 255), FLOOR)
-        sub_rgb = ac.reach_on(plane, muted, ink, FLOOR)
+        # White plate by default: the title block is the densest text on the canvas
+        # (title, subtitle, coverage, omissions) and it is read at whatever size the
+        # viewer opened the file. Black on near-opaque black reads as texture at 25%.
+        white_cart = str(bp["meta"].get("cartouche_plate", "white")).lower() != "dark"
+        if white_cart:
+            plane = ac.PLATE_BG
+            plate_alpha = 1.0
+            title_rgb = ac.PLATE_INK
+            # Secondary lines are 24–30px on an 8192px canvas: legal at 4.5:1 and still tiring
+            # to read. On white the dim tone is pushed to 7:1 instead of 4.5:1, which costs
+            # nothing and is the difference between "dimmed" and "faint".
+            sub_rgb = ac.reach_on(plane, muted, (0, 0, 0), 7.0)
+        else:
+            plate_alpha = 208 / 255.0
+            worst = ac.worst_case_rgb(canvas, (cx0, cy0, cx0 + cw, cy0 + ch_), ink)
+            plane = ac.mix(worst, (0, 0, 0), plate_alpha)
+            title_rgb = ac.reach_on(plane, ink, (255, 255, 255), FLOOR)
+            sub_rgb = ac.reach_on(plane, muted, ink, FLOOR)
         report["cartouche"] = {"plate": list(plane), "floor": FLOOR, "lines": []}
 
-        draw.rectangle([cx0, cy0, cx0 + cw, cy0 + ch_], fill=(0, 0, 0, int(plate_alpha * 255)),
+        draw.rectangle([cx0, cy0, cx0 + cw, cy0 + ch_],
+                       fill=(plane[0], plane[1], plane[2], int(plate_alpha * 255)),
                        outline=accent + (200,), width=max(2, cell // 800))
         x = cx0 + pad
         y = cy0 + pad

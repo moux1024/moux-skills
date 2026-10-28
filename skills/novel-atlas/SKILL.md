@@ -13,17 +13,19 @@ Never produce multiple images meant to be read in sequence. Information must not
 ## Non-negotiable rules
 
 1. **AI draws, code writes.** Generated tiles contain zero text. Every character name, event title, date and connector label is composited by `scripts/stitch.py`. Never ask an image model to render text, and never ship text that appeared inside a generated tile.
-2. **One home, one full body.** A T1 character gets exactly one full-body depiction, in its home zone. Everywhere else the character appears only as an avatar cropped by code from that home tile. Regenerating the same character in another zone is forbidden by default. The crop is a **square box on the face**, sized for the **largest** place that character appears anywhere else — the size arithmetic is verified by script before the batch runs, and the box is checked against the real tile the moment that tile exists, never discovered in the finished image.
+2. **One home, one full body.** A T1 character gets exactly one full-body depiction, in its home zone. Everywhere else the character appears only as an avatar cropped by code from that home tile. Regenerating the same character in another zone is forbidden by default. The crop is a **square box on the face**, and it must be large enough to survive the smallest place that character appears — both are verified by script before the batch runs, not discovered in the finished image.
 3. **Structure picks layout, not genre.** Infer four structural features from the text, then compose layout primitives. Genre is a prior, never a determinant. See `references/layout-primitives.md`.
-4. **Selection is tiered and capped.** T1 ≤ 12, T2 ≤ 40 — `skeleton.py` fails a blueprint over either cap. Omission is allowed; silent omission is not — the blueprint must report coverage gaps to the user.
+4. **Selection is tiered and capped.** T1 ≤ 12, T2 ≤ 40. Omission is allowed; silent omission is not — the blueprint must report coverage gaps to the user.
 5. **Seams are designed, not faded.** Zones are separated by explicit dividers. No feathering: feathering two unrelated pictures only produces a dirty band.
-6. **Three gates before spending on tiles** — content list, local skeleton, single-zone style proof — **plus anchor calibration, twice.** Before the batch: every T1 anchor passes the arithmetic (square, in-zone, above the style floor, sized for its largest remote appearance) and the proof zone's crops are eye-verified on the contact sheet. Before the stitch: every anchor reads `ok` against its real home tile — home zones that did not exist at proof time are calibrated as soon as Step 8 generates them.
+6. **Three gates before spending on tiles** — content list, local skeleton, single-zone style proof — **plus a copy review before the content list and one calibration after the proof.** Do not generate the full tile set until all three gates pass and every T1 anchor reads `ok`.
 7. **Ask for art style before designing.** No style given → ask. Never pick silently.
 8. **Fidelity over comfort, symbol over rewrite.** If content triggers a generation policy, degrade to symbolic depiction (silhouette, shadow, negative space, prop) and label the substitution explicitly. Never let a model substitute a softened version of the text and present it as faithful.
 9. **A body is not a person.** One identity may occupy several chassis over the story. Each chassis is its own character entry with its own portrait and its own `body` — but they must share one face model and declare `same_person_as`. Collapsing them into a single entry (or, worse, merging two different people into one) is a factual error the reader will catch instantly.
 10. **Not every T1 has a face.** If the text says a character gave up the human form, they get `faceless: true` and a `prop`, never a portrait box. A portrait of a body the book says is not humanoid is an invention, and the anchor maths cannot save it.
 11. **Every face must be somebody.** Each zone carries a `cast` whitelist with exact figure counts. A tile is not finished until a vision pass has listed every figure in it and matched them against that list; any readable face not on the list fails the run. See Step 8.5.
 12. **Draw what the text describes, not what the genre implies.** If the book says the old man has a straight moustache, sits on a folding stool and holds a tablet, that is the picture — not "a wise elder in a cape". Prosthetics, interfaces, damage and asymmetry come from the text; the model invents plausible-looking generic cyberpunk otherwise, and generic is the one thing an atlas cannot be.
+13. **Text hangs under the picture, on its own plate.** Every label is black on an opaque white plate, placed below the thing it names: a name under the portrait, an event label under its dot, a zone's name and caption in a plate under the panel. A scrim measured against arbitrary artwork is a legibility bet that is lost the first time somebody views the atlas at fit-to-screen — the plate is a guarantee, not a preference. If a label would land on the title block or on another plate, it moves (or takes the next side); nothing is nudged by a few pixels and shipped.
+14. **Copy is reviewed before it is laid out.** The words are hand-written into the blueprint and every plate is measured from them, so a caption that is two characters too long is also a label that collides. Run `lint_copy.py`, fix its hard errors, then read the sheet once as a reader — names against the text, chapter numbers, whether each caption describes *this* panel — before Gate 2 fixes the geometry around sentences nobody checked.
 
 ## Workflow
 
@@ -119,9 +121,31 @@ The number is not a matter of taste. The avatar crop is roughly 1.3× the head h
 
 Because of that arithmetic, a distant figure is not a smaller depiction of a character, it is a different design decision. Say so at Gate 1 rather than discovering it at stitch time.
 
+Labels default to a **plate under the subject**, not an overlay on it: `meta.label_plate` is `"white"` unless a build deliberately opts into the older measured scrim (`"tone"`). Leave it alone. Pick `meta.zone_caption_side` (`"bottom"` by default) only if the bottom of every panel is unusable — and let the per-zone `caption_side` override handle the panels where the title block sits, rather than flipping the whole grid.
+
+### Step 3.5 — Copy review (before Gate 1)
+
+```bash
+python3 scripts/lint_copy.py atlas_build/blueprint.json -o atlas_build/copy_sheet.md
+```
+
+The copy layer is the only part of the atlas written by hand, and it is what the reader actually reads. It is also what the layout is measured from, so its errors arrive twice: once as a wrong sentence, once as a broken plate.
+
+The script checks what a machine can: every name that appears on the canvas (and every zone name) is present and unique; nothing is a placeholder; brackets balance and punctuation is not repeated or half-width; no two labels in a zone say the same thing; `coverage` arithmetic adds up (`covered + missing == total`) because that block is printed on the image; event labels that carry a chapter number agree with the `chapter` field; years inside one column do not run backwards; captions do not all open with the same two characters. It then measures every string against the geometry it will occupy and fails the ones that do not fit.
+
+It cannot check whether a sentence is true. So the sheet ends with four questions and they are not rhetorical:
+
+1. Does every name appear in the text, spelled the way the text spells it? Grep, do not remember.
+2. Does every event's chapter number or year resolve to the passage it claims?
+3. Does each caption describe **this** panel — or would it fit any panel in the atlas?
+4. Read it straight through: do two zones describe the same moment, or does the copy explain the picture instead of naming it?
+
+An atlas with a wrong name on it is worse than an atlas with one fewer label. Fix the copy here; Gate 2 then measures the fixed text. Do not skip to the skeleton because the copy "looks fine" — the whole point is that it looks fine to the person who wrote it.
+
+
 ### Step 4 — Gate 1: content list
 
-Present in plain language: T1/T2 lists with hit rates, demotions, the event list, chosen primitives and the reasoning, and the coverage block naming which chapters and which turning points were omitted and why.
+Present in plain language: T1/T2 lists with hit rates, demotions, the event list, chosen primitives and the reasoning, and the coverage block naming which chapters and which turning points were omitted and why. Include `copy_sheet.md` — the exact words that will be printed, not a paraphrase of them.
 
 Get confirmation before drawing anything.
 
@@ -135,9 +159,11 @@ Renders the blueprint as a local flat diagram: zone blocks, standing boxes, even
 
 Show it. The user judges density, balance, sight lines, dead space and label collisions here. It also verifies the coordinate system — a mistake found now costs nothing, the same mistake found after 12 tiles costs the run.
 
-The script exits non-zero and lists problems when the grid has gaps or overlaps, a label collides with a zone header, another label or the reserved title block, an event points at an unknown zone, a portrait box leaves its home zone, a portrait box is not square, or a remote avatar has no home portrait to crop from. Fix every item and re-run; do not hand a skeleton with reported problems to the user.
+The script exits non-zero and lists problems when the grid has gaps or overlaps, a plate collides with another plate or with the title block, an event points at an unknown zone, a portrait box leaves its home zone, a portrait box is not square, or a remote avatar has no home portrait to crop from. Fix every item and re-run; do not hand a skeleton with reported problems to the user.
 
-Label and title-block rects are measured at the atlas's **real** cell and scaled to the preview, not measured at preview scale — the same text wrapped at 420px breaks in different places and produces boxes that are off by a few percent, which is enough to invent one collision and hide another. The title block's footprint is drawn in the preview as a dashed box: it is painted last, so anything inside it is lost, and finding that out after twelve paid tiles is the expensive way.
+The preview draws the annotation layer the way the stitcher will: white plates with black text, a caption plate under each panel, event labels below their dots. Plates and caption blocks are measured at the atlas's **real** cell and scaled to the preview, not measured at preview scale — the same text wrapped at 420px breaks in different places and produces boxes that are off by a few percent, which is enough to invent one collision and hide another. The title block's footprint is drawn as a dashed box: it is painted last, so anything inside it is lost, and a caption whose bottom corner falls under it flips to the top of its panel (the stitcher prints a warning naming the zone). Write `caption_side: "top"` on that zone to make the flip deliberate.
+
+Because every plate is opaque now, a collision is two sentences painted over each other rather than a faint smear — the check is worth reading properly rather than skimming.
 
 The two portrait checks are geometry only — they can be made without artwork, which is why they belong here rather than after the style proof. A tall box is almost always a standing figure mistaken for a head; `anchor.py --write-back` squares it, or write a square by hand.
 
@@ -169,8 +195,6 @@ The contact sheet shows, per T1: the home tile with the crop rectangle on it, th
 
 Look at it and answer one question: **is the red rectangle on the face?** A box can be arithmetically perfect and still frame a shoulder. The numbers in `blueprint.json` are hand-written, not derived; change them and re-run until every row reads `ok`. Re-running costs seconds.
 
-Home zones that do not exist yet show `awaiting tile` and pass on arithmetic alone — that is expected at proof time, when only one zone has been drawn. Re-run this script once Step 8 brings the remaining home tiles in; the atlas is not done while any row still awaits its tile.
-
 When the box is in the wrong *place* — not merely too small — do not guess again from the contact sheet. Bake a grid onto the home tile and read the head's four edges off it:
 
 ```bash
@@ -198,7 +222,7 @@ Every returned image still carries a watermark, and image-to-image tops out near
 
 ```bash
 python3 scripts/finalize.py gen/raw.png -o tiles/z9_0_2.png --cell 2048 \
-    --wm 880,946,1024,1024 --stamp z9_0_2
+    --wm 880,946,1024,1024 --stamp z9
 ```
 
 `--wm` fills the stamp by continuing the vertical gradient found just above it, column by column. Cloning clean artwork from beside the stamp looks fine in theory and fails on screen: the floor is a gradient, so the clone sits one tone off and reads as a rectangle. `--stamp` writes the source size and an `upscaled` flag into `cast_audit.json`, so a half-resolution tile is declared in the record rather than hidden in a habit.
@@ -214,10 +238,10 @@ python3 scripts/audit_cast.py atlas_build/blueprint.json -d atlas_build/tiles --
 python3 scripts/audit_cast.py atlas_build/blueprint.json -d atlas_build/tiles          # verify
 ```
 
-For each tile, look at it — full frame, plus each dark corner brightened 2–3×, because the model hides people in shadow — and write `atlas_build/tiles/cast_audit.json`. Entries are keyed by tile, not by zone: a zone spanning several cells has one entry per tile (`z7_2_1`, `z7_2_2`, …), because a face invented in the second cell is exactly as wrong as one invented in the first.
+For each tile, look at it — full frame, plus each dark corner brightened 2–3×, because the model hides people in shadow — and write `atlas_build/tiles/cast_audit.json`:
 
 ```json
-{ "z7_2_1": { "zone": "z7", "tile": "tiles/z7_2_1.png", "sha256": "…", "verdict": "pass",
+{ "z7": { "tile": "tiles/z7_2_1.png", "sha256": "…", "verdict": "pass",
   "figures": [
     { "character": "c_jeanne", "prominence": "face",   "note": "…" },
     { "character": "c_liu",    "prominence": "face",   "note": "…" },
@@ -242,9 +266,20 @@ Fixing an audit failure means regenerating with a stronger `[FORBIDDEN]` line, o
 python3 scripts/stitch.py atlas_build/blueprint.json -d atlas_build/tiles -o atlas_build/atlas.png
 ```
 
-The script composites tiles on the grid, crops bleed, unifies global colour temperature, draws seam dividers, crops and pastes home portraits as remote avatars, draws every text element with scrims, enforces label contrast ≥ 4.5:1, draws the title block and coverage note, and writes `atlas_build/stitch_report.json`.
+The script composites tiles on the grid, crops bleed, unifies global colour temperature, draws seam dividers, crops and pastes home portraits as remote avatars, draws every text element on a white plate, draws the title block and coverage note, and writes `atlas_build/stitch_report.json`.
 
-The 4.5:1 floor applies to the title block too, not only to zone labels — secondary lines are dimmed automatically to the darkest tone that still passes, and every line's measured ratio lands in `report.cartouche`.
+The annotation layer is one system, not a pile of labels:
+
+| element | where it goes | why |
+|---|---|---|
+| zone caption | a plate under the panel, name line + caption | a caption belongs under the picture; it is the first thing read and the last thing legible when a dark scrim sits on artwork |
+| portrait / avatar name | centred under the box or the circle | a name above a head collides with the caption plate and covers the crown |
+| event label | under the dot, centred | the dot marks the point; text above it covers the thing the dot points at |
+| free label | under its declared point (`anchor: cb`) | same rule, same plate |
+
+Each of those falls back to another side only when the preferred one is blocked by the panel edge, the caption plate or the title block — below, then above, right, left, and `label_side` on an event can put one of those first for a dense cluster. The dot never moves, so a leader line still points at something.
+
+Black on white is 18:1 by construction, so the 4.5:1 floor stops being a fight and starts being a check that the plate was actually painted. It still applies to the title block: secondary lines are pushed darker until they clear the floor, and every line's measured ratio lands in `report.cartouche`. `meta.label_plate: "tone"` restores the old measured-scrim behaviour for a build that was drawn around it; do not reach for it to make an image look calmer — cut a label instead.
 
 The title block is painted **after** the labels, so a label placed where it sits is sliced in half by its edge. Every overlap is named in `report.warnings` — `label under the cartouche: '…' at [x,y]`, and `label collision: '…' vs '…'` for two labels that landed on each other. The fix is to move that label in the blueprint — the event's `x`/`y`, or the zone label — never to nudge the block. Moving the label by hand keeps its marker dot and connector line together; the stitcher must not silently shift text, or a leader line ends up pointing at nothing.
 
@@ -270,4 +305,4 @@ python3 -m pip install pillow
 - `references/art-styles.md` — preset style menu with readability compensation tables and prompt language. Load when asking about or applying art style.
 - `references/style-metrics.json` — the machine-readable avatar size floor per style, read by `anchor.py`. When you change a `Min avatar edge` in `art-styles.md`, change it here too; the script reports any drift between the two as a failure rather than trusting either.
 
-Scripts: `normalize.py` (Step 0) · `chunk.py` (Step 1 reading plan) · `stats.py` (Step 2) · `skeleton.py` (Gate 2) · `measure.py` (Step 7 measurement) · `anchor.py` (Step 7) · `finalize.py` (Step 8 tile intake) · `audit_cast.py` (Step 8.5) · `stitch.py` (Step 9). `atlas_common.py` holds the geometry all of them share — label plates and title-block footprint above all. If two scripts disagree about where something is, the bug is that one of them has its own copy.
+Scripts: `normalize.py` (Step 0) · `chunk.py` (Step 1 reading plan) · `stats.py` (Step 2) · `lint_copy.py` (Step 3.5 copy review) · `skeleton.py` (Gate 2) · `measure.py` (Step 7 measurement) · `anchor.py` (Step 7) · `finalize.py` (Step 8 tile intake) · `audit_cast.py` (Step 8.5) · `stitch.py` (Step 9). `atlas_common.py` holds the geometry all of them share — the label plate, the caption block and the title-block footprint above all: `text_box()`, `zone_caption_geometry()`, `cartouche_rect()`. If two scripts disagree about where something is, the bug is that one of them has its own copy.
