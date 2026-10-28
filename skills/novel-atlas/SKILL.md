@@ -1,7 +1,7 @@
 ---
 name: novel-atlas
 description: Turns a full novel into one ultra-high-resolution atlas image that holds its timeline, cast and key events, by designing a blueprint of tiled zones and stitching locally composited tiles into a single picture. This skill should be used when the user wants a 小说全景图, 人物关系图, 剧情时间线大图, 世界观地图, 全书信息图, 人物谱, a one-image book summary, or asks to visualize an entire novel's structure without splitting it across pages. Triggers on a novel file (.txt/.md/.epub/.docx) plus a request for one big image containing the whole story.
-version: 0.3.0
+version: 0.4.0
 ---
 
 # Novel Atlas
@@ -17,7 +17,7 @@ Never produce multiple images meant to be read in sequence. Information must not
 3. **Structure picks layout, not genre.** Infer four structural features from the text, then compose layout primitives. Genre is a prior, never a determinant. See `references/layout-primitives.md`.
 4. **Selection is tiered and capped.** T1 ≤ 12, T2 ≤ 40. Omission is allowed; silent omission is not — the blueprint must report coverage gaps to the user.
 5. **Seams are designed, not faded.** Zones are separated by explicit dividers. No feathering: feathering two unrelated pictures only produces a dirty band.
-6. **Three gates before spending on tiles** — content list, local skeleton, single-zone style proof — **plus a copy review before the content list and one calibration after the proof.** Do not generate the full tile set until all three gates pass and every T1 anchor reads `ok`.
+6. **Three gates before spending on tiles** — content list, local skeleton, single-zone style proof — **plus a copy review before the content list, one calibration after the proof, and a tile review before stitching.** Do not generate the full tile set until all three gates pass and every T1 anchor reads `ok`.
 7. **Ask for art style before designing.** No style given → ask. Never pick silently.
 8. **Fidelity over comfort, symbol over rewrite.** If content triggers a generation policy, degrade to symbolic depiction (silhouette, shadow, negative space, prop) and label the substitution explicitly. Never let a model substitute a softened version of the text and present it as faithful.
 9. **A body is not a person.** One identity may occupy several chassis over the story. Each chassis is its own character entry with its own portrait and its own `body` — but they must share one face model and declare `same_person_as`. Collapsing them into a single entry (or, worse, merging two different people into one) is a factual error the reader will catch instantly.
@@ -26,6 +26,7 @@ Never produce multiple images meant to be read in sequence. Information must not
 12. **Draw what the text describes, not what the genre implies.** If the book says the old man has a straight moustache, sits on a folding stool and holds a tablet, that is the picture — not "a wise elder in a cape". Prosthetics, interfaces, damage and asymmetry come from the text; the model invents plausible-looking generic cyberpunk otherwise, and generic is the one thing an atlas cannot be.
 13. **Text hangs under the picture, on its own plate.** Every label is black on an opaque white plate, placed below the thing it names: a name under the portrait, an event label under its dot, a zone's name and caption in a plate under the panel. A scrim measured against arbitrary artwork is a legibility bet that is lost the first time somebody views the atlas at fit-to-screen — the plate is a guarantee, not a preference. If a label would land on the title block or on another plate, it moves (or takes the next side); nothing is nudged by a few pixels and shipped.
 14. **Copy is reviewed before it is laid out.** The words are hand-written into the blueprint and every plate is measured from them, so a caption that is two characters too long is also a label that collides. Run `lint_copy.py`, fix its hard errors, then read the sheet once as a reader — names against the text, chapter numbers, whether each caption describes *this* panel — before Gate 2 fixes the geometry around sentences nobody checked.
+15. **A tile passes on what it depicts, not on who is in it.** The cast audit answers "is every face somebody"; it cannot see that the war god never raised the hand the zone was built around. Every tile is reviewed on three axes — **intent** (does the picture depict this zone's own claim), **plausibility** (anatomy, weight, one light source, one era, one material; nobody standing inside a wall), **taste** (composition, room left for the plates, the model's recurring uglies) — and the verdict is bound to the tile's hash, so a regenerated image cannot inherit a review.
 
 ## Workflow
 
@@ -260,6 +261,42 @@ For each tile, look at it — full frame, plus each dark corner brightened 2–3
 
 Fixing an audit failure means regenerating with a stronger `[FORBIDDEN]` line, or cropping the extra figure out — not editing the audit until it passes. When a tile passes, the watermark is removed and the *new* hash is re-registered, because a stale hash is a lie about which image was approved.
 
+This step answers "is every face somebody". It does not answer "is this the right picture" — Step 8.6 does, and it runs first when a tile is regenerated.
+
+### Step 8.6 — Tile review (intent, plausibility, taste)
+
+Step 8.5 counts people. It says nothing about whether the picture is the picture the zone was built around — a war god with its arms at its sides still passes a face count, and so does a death scene where nobody dies.
+
+```bash
+python3 scripts/review_tiles.py atlas_build/blueprint.json -d atlas_build/tiles --init   # pending entries
+python3 scripts/review_tiles.py atlas_build/blueprint.json -d atlas_build/tiles          # sheet + checklist + verify
+```
+
+The run writes two artifacts and then judges the record:
+
+- **`tiles/tile_sheet.png`** — every tile pasted exactly where it will be stitched, with its zone id and its `duty` printed on the corner. This is the only view in which two failures are visible at all: **drift**, a zone whose palette or light direction disagrees with its neighbours, and **seam continuity**, whether the thing `seam_reason` promised actually runs off the edge it promised.
+- **`tiles/review_sheet.md`** — the same grid in text: each zone's own claim printed above the three questions, so the picture is never judged against a claim you have to remember.
+
+The three axes, and what a "no" looks like:
+
+| axis | the question | a real "no" |
+|---|---|---|
+| `intent` | does this depict what `duty` says, not merely a scene of the right genre in the right costume | the zone is "the first time it raised its own hand" and the hands are down; "he grows inside her skull" and the two of them are standing a body-width apart |
+| `plausibility` | anatomy, weight, one light source, one era, one material — the world holds together | a figure sunk into the floor, a glass vessel hovering with nothing under it, a shoulder joint bending the wrong way, six fingers, two shadows from one lamp |
+| `aesthetic` | composition, negative space left for the plates, tone against the proof tile | a named figure sliced by the sheet's outer edge, the subject in a dark corner, a face smeared by upscaling |
+
+**The script measures none of these.** It builds the artifact, binds the verdict to the tile's hash, and refuses three specific kinds of dishonesty: a tile with no record, a record whose hash no longer matches the pixels, and **three passes with no sentence** — because an entry that says "pass" three times and nothing else is a rubber stamp, and three weeks later nobody can tell it from a review. Every record needs one sentence about what was actually on screen.
+
+It also refuses to automate the three questions themselves, and that is deliberate:
+
+- drift is not detectable from statistics — zones differ in tone **by design**, so no mean-colour test can separate designed variety from a tile that drifted. The numbers are printed in the checklist as reference; the comparison is the side-by-side sheet.
+- seams are symbolic, not continuous. Each tile is generated independently, so an edge-matching test would fire on every correct build.
+- taste is not a metric. If it were, this step would be a script and not a gate.
+
+Fixing a failure means regenerating that zone with a corrected prompt — usually one sentence, and the record's own `fix` field is where that sentence should be written, so the next run starts from the observation. **Never edit a record until it passes.** A regenerated tile invalidates its cast audit too (same hash-binding), so run this one first: it decides whether the tile survives at all, and counting faces on a picture about to be replaced is wasted work.
+
+Order of work, once: look at the sheet, open at full resolution every tile that looks wrong at 500px, write `figures` and the three axes in the same pass, then run `review_tiles.py` and `audit_cast.py`. Opening four tiles is normal; opening all twelve means the batch drifted and the proof tile was not representative.
+
 ### Step 9 — Stitch, label, deliver
 
 ```bash
@@ -305,4 +342,4 @@ python3 -m pip install pillow
 - `references/art-styles.md` — preset style menu with readability compensation tables and prompt language. Load when asking about or applying art style.
 - `references/style-metrics.json` — the machine-readable avatar size floor per style, read by `anchor.py`. When you change a `Min avatar edge` in `art-styles.md`, change it here too; the script reports any drift between the two as a failure rather than trusting either.
 
-Scripts: `normalize.py` (Step 0) · `chunk.py` (Step 1 reading plan) · `stats.py` (Step 2) · `lint_copy.py` (Step 3.5 copy review) · `skeleton.py` (Gate 2) · `measure.py` (Step 7 measurement) · `anchor.py` (Step 7) · `finalize.py` (Step 8 tile intake) · `audit_cast.py` (Step 8.5) · `stitch.py` (Step 9). `atlas_common.py` holds the geometry all of them share — the label plate, the caption block and the title-block footprint above all: `text_box()`, `zone_caption_geometry()`, `cartouche_rect()`. If two scripts disagree about where something is, the bug is that one of them has its own copy.
+Scripts: `normalize.py` (Step 0) · `chunk.py` (Step 1 reading plan) · `stats.py` (Step 2) · `lint_copy.py` (Step 3.5 copy review) · `skeleton.py` (Gate 2) · `measure.py` (Step 7 measurement) · `anchor.py` (Step 7) · `finalize.py` (Step 8 tile intake) · `audit_cast.py` (Step 8.5) · `review_tiles.py` (Step 8.6 tile review) · `stitch.py` (Step 9). `atlas_common.py` holds the geometry all of them share — the label plate, the caption block and the title-block footprint above all: `text_box()`, `zone_caption_geometry()`, `cartouche_rect()`. If two scripts disagree about where something is, the bug is that one of them has its own copy. Hashing is the same story for tile records: `zone_sha()` in both audit scripts covers **every cell** a zone occupies, so a regenerated cell cannot inherit a verdict written for its neighbour.

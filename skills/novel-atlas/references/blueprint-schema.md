@@ -114,7 +114,7 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
 
 **`zones[]`**
 - `col`/`row`/`w`/`h`: cell rectangle. Zones must tile the canvas exactly, no gaps, no overlaps. `skeleton.py` fails on both.
-- `duty`: one sentence. If it needs two, the zone is doing two jobs and should be split. **Internal only** — it appears in the skeleton so the reviewer can judge intent, never on the finished image.
+- `duty`: one sentence. If it needs two, the zone is doing two jobs and should be split. **Internal only** — it appears in the skeleton so the reviewer can judge intent, never on the finished image. It is also the claim `review_tiles.py` prints above each tile at Step 8.6, so a duty written as a mood ("压抑的城市感") makes the tile unfalsifiable: write the thing that should be visible ("它第一次自己抬起手"), and the review has something to fail.
 - `caption`: optional, **reader-facing**. One short line under the zone name, in the panel's caption plate. This is the only editorial text a viewer sees besides labels, so keep it concrete: it says what this panel shows, not how the reader should feel. Two lines maximum at `cell × 0.78` width, and `lint_copy.py` fails anything longer.
 - `caption_side`: optional per-zone override of `meta.zone_caption_side`, for a panel whose bottom corner belongs to the title block.
 - `tonal`: `light` | `dark` | `mid`. Only used when `meta.label_plate` is `"tone"`: it picks the scrim direction for the zone. With white plates it is inert and can be left in place as a record of the zone's brightness.
@@ -154,6 +154,8 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
 | A faceless character has no portrait.box | `skeleton.py` | A human face is invented for a non-human body |
 | Every tile has an audit newer than the tile | `audit_cast.py` | A regenerated image inherits a stale pass |
 | No readable face outside `cast.named` | `audit_cast.py` | The atlas names somebody the book never wrote |
+| Every tile reviewed on intent / plausibility / taste | `review_tiles.py` | The picture is the right genre and the wrong claim — arms down in the zone built around a raised hand |
+| A review with no sentence is not a review | `review_tiles.py` | Three passes and nothing said: indistinguishable from a rubber stamp three weeks later |
 | Every expected tile exists | `stitch.py` | Hatched placeholder in the final image |
 
 Both scripts exit non-zero on failure. Treat non-zero as "not done", not as a warning.
