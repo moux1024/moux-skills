@@ -67,5 +67,21 @@
       "social",
       "carousel"
     ]
+  },
+  {
+    "id": "humanizer-zh",
+    "name": "Humanizer ZH",
+    "description": "Edits Chinese prose to remove filler, repetition and template phrasing while keeping facts, hedging and the author's voice. Vendored from op7418/Humanizer-zh (MIT) unmodified; novel-atlas uses its plate-scale subset through references/copy-voice.md.",
+    "repo": "moux1024/moux-skills",
+    "path": "skills/humanizer-zh",
+    "version": "0.1.0",
+    "upstream": "op7418/Humanizer-zh",
+    "license": "MIT",
+    "tags": [
+      "writing",
+      "chinese",
+      "editing",
+      "vendor"
+    ]
   }
 ]

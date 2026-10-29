@@ -22,6 +22,16 @@ tools/
   validate-skills.js
 ```
 
+## Vendored Skills
+
+Some skills here are third-party work kept **unmodified**, so that one clone reproduces a working setup. They are marked in `registry.json` with `upstream`, `license` and the `vendor` tag, and they ship with their own `LICENSE`:
+
+| Skill | Upstream | License |
+|---|---|---|
+| `humanizer-zh` | [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh) | MIT |
+
+Vendored skills are not edited here. Fixes belong upstream; if a local change is unavoidable, record it in that skill's `CHANGELOG.md` so the divergence is visible.
+
 ## Skill Contract
 
 Each skill directory must contain:
