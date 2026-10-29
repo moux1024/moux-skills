@@ -11,9 +11,11 @@ as a reader instead of skimming it as its author.
 What it can check: lengths against the real geometry, duplicates, placeholders, punctuation,
 bracket balance, chapter coverage arithmetic, year order inside a zone, and the wording tics
 that survive machine authorship (every caption opening the same way, every event missing its
-chapter anchor). What it cannot check: whether a caption is *true*, whether a name is the one
-the book uses, and whether a zone is describing the thing the picture shows. Those are the
-four questions at the bottom of the sheet, and they are why this is a gate and not a linter.
+chapter anchor, the nine `humanizer-zh` patterns that survive at plate scale — see
+`references/copy-voice.md`). What it cannot check: whether a caption is *true*, whether a name
+is the one the book uses, and whether a zone is describing the thing the picture shows. Those
+are the four questions at the bottom of the sheet, and they are why this is a gate and not a
+linter.
 
 Usage:
     python3 lint_copy.py atlas_build/blueprint.json -o atlas_build/copy_sheet.md
@@ -36,6 +38,28 @@ HALF_PUNCT = re.compile(r"[\u4e00-\u9fff][,;:!?](?![0-9])")
 YEAR = re.compile(r"(19|20)\d{2}")
 CHAPTER_REF = re.compile(r"第\s*(\d+)\s*[回章]")
 
+# The voice pass, made countable. These are the `humanizer-zh` patterns that still fire when a
+# sentence is fifteen characters long; everything else in that skill needs a paragraph to exist
+# in. They are warnings, never errors: a real correction ("他们以为…其实是…") is a legitimate
+# 假对比, and a four-rank list in one panel is a fact, not filler. The sheet prints the count so
+# a reader can tell "one deliberate case" from "this build was written by a template".
+VOICE_RULES = (
+    ("拔高", re.compile(r"彰显|诠释|象征着|标志着|意味着一个|预示着一个|见证(了|着)?[^，。]{0,6}(时代|秩序|历史)"),
+     "句尾拔高：删掉这个尾巴，事实还在"),
+    ("拔高", re.compile(r"史诗|宿命|齿轮|洪流|缩影|注脚|图腾|不朽|永恒|波澜壮阔|暗流涌动"),
+     "AI 高频词/四字排比：换成具体的名词"),
+    ("假对比", re.compile(r"(不是|并非|不只是|不仅是)[^，。]{0,12}(而是|更是)|与其说[^，。]{0,12}不如说"),
+     "假对比：否定部分没有纠正任何真实误解就删掉"),
+    ("意义拔高", re.compile(r"只为|不过是[^，。]{0,8}(而|罢)|终究只是|都不过是"),
+     "格言腔：读者读的是这一格发生了什么，不是一句评语"),
+    ("抒情", re.compile(r"不属于自己|无法言说|难以名状|某种(东西|感觉)|一种[^，。]{0,4}的感觉|命运的"),
+     "抒情替代陈述：画面里是哪件东西，就写哪件"),
+    ("万能背景", re.compile(r"随着[^，。]{0,10}的(发展|进步|到来|兴起)|在[^，。]{0,6}的(时代|背景)"),
+     "万能背景：这一句可以出现在任何一本书里"),
+    ("进行式", re.compile(r"进行[\u4e00-\u9fff]{2}"),
+     "「进行＋动词」：换直接动词"),
+)
+
 
 class Copy:
     def __init__(self):
@@ -48,6 +72,26 @@ class Copy:
 
     def warn(self, group, where, msg):
         self.warns.append((group, f"{where}: {msg}"))
+
+
+def check_voice(cp, where, kind, text):
+    """Warn on the phrasings that make a plate read as machine-written.
+
+    Deliberately blunt and deliberately a warning: the point is that the author sees the
+    pattern named, not that the build fails. Two of these fire on sentences that are correct
+    and should stay — so a hit is a question, and the sheet says so.
+    """
+    for group, pat, hint in VOICE_RULES:
+        m = pat.search(text)
+        if m:
+            cp.warn(f"语感·{group}", where, f"「{m.group(0)}」— {hint}")
+    stops = text.count("、")
+    if stops >= 2 and re.search(r"[，,]\s*(和|以及)", text):
+        cp.warn("语感·清单", where, f"{stops} 个顿号收在「和…」上——三件并列加一个尾巴，是填充不是信息")
+    elif stops >= 4:
+        cp.warn("语感·清单", where, f"{stops + 1} 项并列，读的时候会数不过来")
+    if kind == "subtitle" and re.search(r"[，,]\s*(和|以及|与)", text):
+        cp.warn("语感·对偶", where, "副标题用对偶收尾（A，和B）——最像机器写的一句，改成一个动词")
 
 
 def check_text(cp, where, kind, text, lines, max_lines, width_px, max_width, size_px):
@@ -86,6 +130,8 @@ def check_text(cp, where, kind, text, lines, max_lines, width_px, max_width, siz
                       f"标注不会自动换行，会直接压出分区")
     if size_px < 24:
         cp.warn("可读性", where, f"字号只有 {size_px:.0f}px，缩到半屏就看不见了")
+    if kind in ("caption", "subtitle", "label", "event"):
+        check_voice(cp, where, kind, t)
 
 
 def main():
@@ -119,7 +165,7 @@ def main():
         font = ac.resolve_font(int(size))
         lines = ac.wrap_cjk(draw, text, font, maxw)
         w = max(ac.text_width(draw, ln, font) for ln in lines)
-        check_text(cp, f"标题栏 {kind}", "caption", text, len(lines), 2, w, maxw, size)
+        check_text(cp, f"标题栏 {kind}", kind, text, len(lines), 2, w, maxw, size)
         cp.records.append({"where": "标题栏", "kind": kind, "text": text, "size": size,
                            "lines": lines})
 
@@ -256,13 +302,30 @@ def main():
 
     # ---------------------------------------------------------------- wording tics
     caps = [str(z.get("caption", "")).strip() for z in zones if z.get("caption")]
+    # One character first: a caption that opens on 他 / 她 / 一 is a subject repeated, which the
+    # two-character check below cannot see ("他离开…" and "他没有身体…" share only one char).
+    # Six of one build's twelve captions opened on 他, and no reader needed a script for that —
+    # but the author did.
+    firsts = {}
+    for c in caps:
+        if len(c) >= 2:
+            firsts.setdefault(c[0], []).append(c[:10])
+    flagged_firsts = set()
+    for ch, items in firsts.items():
+        if len(items) >= 3:
+            flagged_firsts.add(ch)
+            cp.warn("模板开头", f"「{ch}…」",
+                    f"{len(items)} 条副题从同一个字起头：{'、'.join(items[:3])}"
+                    f"——换主语，不是换句式")
     heads = {}
     for c in caps:
         if len(c) >= 2:
             heads.setdefault(c[:2], []).append(c[:10])
     for head, items in heads.items():
-        if len(items) >= 3:
-            cp.warn("开头重复", f"「{head}…」", f"{len(items)} 条副题同一个开头：{'、'.join(items[:3])}")
+        if len(items) >= 3 and head[0] not in flagged_firsts:
+            cp.warn("模板开头", f"「{head}…」",
+                    f"{len(items)} 条副题同一个开头：{'、'.join(items[:3])}"
+                    f"——换主语，不要换句式")
     # One aggregate, not one warning per event: forty lines saying the same thing is how a
     # report stops being read, and the count is the number that matters.
     no_anchor = []
@@ -341,12 +404,14 @@ def main():
         A(f"图上最小的字：{s:.0f}px —— 「{t[:20]}」，在 {bp['meta']['canvas']['cols'] * cell}px 宽的图里")
         A("")
 
-    A("## 人工四问（机器答不了）")
+    A("## 人工六问（机器答不了）")
     A("")
     A("1. 每个名字都在原文里出现过？逐条 grep，别凭印象——一个想当然的名字会印在图上两百年。")
     A("2. 每条事件的章号/年份都能回到原文？回查锚错了，读者顺着找会找到别人的段落。")
     A("3. 每句副题描述的是**这一格画的东西**，还是一句放到任何一格都成立的抒情？")
     A("4. 通读一遍：有没有两格其实是同一件事，或者某一格的文案在替画面下结论？")
+    A("5. 十二句并排读：有没有四句同一个开头、同一副腔调？（`references/copy-voice.md`）")
+    A("6. 每一句都留得住一个具体的名词、动作或数字吗？只剩情绪的那句重写。")
     A("")
 
     out = args.out or os.path.join(os.path.dirname(os.path.abspath(args.blueprint)),
@@ -363,7 +428,7 @@ def main():
             print(f"  … {len(cp.errors) - 20} more errors in the sheet")
     if cp.errors:
         sys.exit(2)
-    print("Copy is clean enough to lay out. Read the sheet before Gate 2 — the four "
+    print("Copy is clean enough to lay out. Read the sheet before Gate 2 — the six "
           "questions are the ones a script cannot answer.")
 
 

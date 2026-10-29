@@ -1,7 +1,8 @@
 ---
 name: novel-atlas
 description: Turns a full novel into one ultra-high-resolution atlas image that holds its timeline, cast and key events, by designing a blueprint of tiled zones and stitching locally composited tiles into a single picture. This skill should be used when the user wants a 小说全景图, 人物关系图, 剧情时间线大图, 世界观地图, 全书信息图, 人物谱, a one-image book summary, or asks to visualize an entire novel's structure without splitting it across pages. Triggers on a novel file (.txt/.md/.epub/.docx) plus a request for one big image containing the whole story.
-version: 0.4.0
+version: 0.5.0
+agent_created: true
 ---
 
 # Novel Atlas
@@ -25,7 +26,7 @@ Never produce multiple images meant to be read in sequence. Information must not
 11. **Every face must be somebody.** Each zone carries a `cast` whitelist with exact figure counts. A tile is not finished until a vision pass has listed every figure in it and matched them against that list; any readable face not on the list fails the run. See Step 8.5.
 12. **Draw what the text describes, not what the genre implies.** If the book says the old man has a straight moustache, sits on a folding stool and holds a tablet, that is the picture — not "a wise elder in a cape". Prosthetics, interfaces, damage and asymmetry come from the text; the model invents plausible-looking generic cyberpunk otherwise, and generic is the one thing an atlas cannot be.
 13. **Text hangs under the picture, on its own plate.** Every label is black on an opaque white plate, placed below the thing it names: a name under the portrait, an event label under its dot, a zone's name and caption in a plate under the panel. A scrim measured against arbitrary artwork is a legibility bet that is lost the first time somebody views the atlas at fit-to-screen — the plate is a guarantee, not a preference. If a label would land on the title block or on another plate, it moves (or takes the next side); nothing is nudged by a few pixels and shipped.
-14. **Copy is reviewed before it is laid out.** The words are hand-written into the blueprint and every plate is measured from them, so a caption that is two characters too long is also a label that collides. Run `lint_copy.py`, fix its hard errors, then read the sheet once as a reader — names against the text, chapter numbers, whether each caption describes *this* panel — before Gate 2 fixes the geometry around sentences nobody checked.
+14. **Copy is reviewed twice before it is laid out — voice, then measurement.** The words are hand-written into the blueprint and every plate is measured from them, so a caption that is two characters too long is also a label that collides. But a plate is also fifteen characters of the only prose the reader ever sees, which is exactly where machine-written copy is most exposed: four captions opening on 「一个」, a subtitle closed with 「，和他的二百年」, a label that reads like a review quote. Rewrite the copy against `references/copy-voice.md` first, then run `lint_copy.py`, fix its hard errors, then read the sheet once as a reader — names against the text, chapter numbers, whether each caption describes *this* panel — before Gate 2 fixes the geometry around sentences nobody checked. A build whose copy nobody rewrote is recognisable at a glance, and no amount of artwork rescues it.
 15. **A tile passes on what it depicts, not on who is in it.** The cast audit answers "is every face somebody"; it cannot see that the war god never raised the hand the zone was built around. Every tile is reviewed on three axes — **intent** (does the picture depict this zone's own claim), **plausibility** (anatomy, weight, one light source, one era, one material; nobody standing inside a wall), **taste** (composition, room left for the plates, the model's recurring uglies) — and the verdict is bound to the tile's hash, so a regenerated image cannot inherit a review.
 
 ## Workflow
@@ -124,7 +125,34 @@ Because of that arithmetic, a distant figure is not a smaller depiction of a cha
 
 Labels default to a **plate under the subject**, not an overlay on it: `meta.label_plate` is `"white"` unless a build deliberately opts into the older measured scrim (`"tone"`). Leave it alone. Pick `meta.zone_caption_side` (`"bottom"` by default) only if the bottom of every panel is unusable — and let the per-zone `caption_side` override handle the panels where the title block sits, rather than flipping the whole grid.
 
-### Step 3.5 — Copy review (before Gate 1)
+The copy is drafted here, in the same pass as the geometry — subtitle, twelve captions, forty event labels — and it is drafted **once as a writer and once as an editor**. Do not leave it for the copy review: a caption written to fill a slot ("一个以…为教义的教会") is harder to disown later than to write well now. See Step 3.5a.
+
+### Step 3.5 — Copy: voice, then measurement (before Gate 1)
+
+Two passes, in this order, because they answer different questions. 3.5a asks whether the sentence is worth printing. 3.5b asks whether it fits the plate it will be printed on. Run them the other way round and the geometry gets fixed around a sentence that is about to be replaced — twice the work, and a skeleton measured against words nobody kept.
+
+#### 3.5a — the voice pass
+
+```bash
+# humanizer-zh, if installed: ~/.workbuddy/skills/humanizer-zh/SKILL.md
+# the atlas-scale subset of it: references/copy-voice.md
+```
+
+Load `references/copy-voice.md` before writing or rewriting a single caption. It carries the nine `humanizer-zh` patterns that still fire when a sentence is fifteen characters long, the four failures this format has and prose does not, and the plate grammar for each surface. If the `humanizer-zh` skill is installed, load it as well for the general edit rules; if it is not, `copy-voice.md` is self-contained and the pass still works.
+
+Rewrite in this order, and only these: `meta.subtitle` → the twelve `caption`s → the labels that read like a remark about the panel. Names, chapter numbers, years, quantities and causation **do not move**, and the rewrite may not be more than two characters longer than what it replaces — the plate is measured from the string, so a caption that grows does not become better copy, it becomes a collision.
+
+The five tells are countable by eye in a few seconds:
+
+- **模板开头** — four captions on 「一个…的…」, six on 「他」. Vary the *subject*, not the sentence.
+- **顿号清单** — 「武馆、黑帮、游骑兵，和一个…」. Three nouns and a 和 is how a model fills a caption with nothing to say.
+- **对偶副标题** — 「A，和他的B」. Two numbers and a comma, reading as profound, saying what the title says.
+- **抒情替代陈述** — 「挖开了一样不属于自己的东西」. The frame contains a ship; write the ship.
+- **格言腔** — 「只为把侠义一次钓干」. That is a review quote, not a fact about the panel.
+
+A line that is already right stays. A pass that rewrites all twelve rewrote something it should not have.
+
+#### 3.5b — the measurement pass
 
 ```bash
 python3 scripts/lint_copy.py atlas_build/blueprint.json -o atlas_build/copy_sheet.md
@@ -132,14 +160,18 @@ python3 scripts/lint_copy.py atlas_build/blueprint.json -o atlas_build/copy_shee
 
 The copy layer is the only part of the atlas written by hand, and it is what the reader actually reads. It is also what the layout is measured from, so its errors arrive twice: once as a wrong sentence, once as a broken plate.
 
-The script checks what a machine can: every name that appears on the canvas (and every zone name) is present and unique; nothing is a placeholder; brackets balance and punctuation is not repeated or half-width; no two labels in a zone say the same thing; `coverage` arithmetic adds up (`covered + missing == total`) because that block is printed on the image; event labels that carry a chapter number agree with the `chapter` field; years inside one column do not run backwards; captions do not all open with the same two characters. It then measures every string against the geometry it will occupy and fails the ones that do not fit.
+The script checks what a machine can: every name that appears on the canvas (and every zone name) is present and unique; nothing is a placeholder; brackets balance and punctuation is not repeated or half-width; no two labels in a zone say the same thing; `coverage` arithmetic adds up (`covered + missing == total`) because that block is printed on the image; event labels that carry a chapter number agree with the `chapter` field; years inside one column do not run backwards; captions do not all open with the same character; and the `humanizer-zh` patterns that survive at this size — 拔高, 假对比, 格言腔, 抒情, 万能背景, 顿号清单, 对偶副标题 — are named so the author sees which one fired. It then measures every string against the geometry it will occupy and fails the ones that do not fit.
 
-It cannot check whether a sentence is true. So the sheet ends with four questions and they are not rhetorical:
+The voice warnings are warnings, not errors: 「他们以为…其实是…」 is a legitimate correction and a four-rank list in one panel is a fact. What the count buys is the ability to tell one deliberate case from twelve template ones.
+
+It cannot check whether a sentence is true. So the sheet ends with six questions and they are not rhetorical:
 
 1. Does every name appear in the text, spelled the way the text spells it? Grep, do not remember.
 2. Does every event's chapter number or year resolve to the passage it claims?
 3. Does each caption describe **this** panel — or would it fit any panel in the atlas?
 4. Read it straight through: do two zones describe the same moment, or does the copy explain the picture instead of naming it?
+5. Read the twelve captions side by side: four opening the same way, in the same register?
+6. Does every line still hold one concrete noun, action or number — or is it only a mood?
 
 An atlas with a wrong name on it is worse than an atlas with one fewer label. Fix the copy here; Gate 2 then measures the fixed text. Do not skip to the skeleton because the copy "looks fine" — the whole point is that it looks fine to the person who wrote it.
 
@@ -339,7 +371,8 @@ python3 -m pip install pillow
 - `references/context-budget.md` — how long is too long: effective context, the three reading budgets, the digest contract and the arithmetic that picks the chunk size. Load when the book is over ~150k characters.
 - `references/layout-primitives.md` — structural features, primitive vocabulary, adjacency rules, two worked derivations. Load when designing the layout.
 - `references/blueprint-schema.md` — the exact JSON contract consumed by the scripts. Load when writing or debugging a blueprint.
+- `references/copy-voice.md` — how the reader-facing copy gets written: the nine `humanizer-zh` patterns that survive at plate scale, the four tells this format has and prose does not, the plate grammar for each surface, and a worked rewrite of twelve real captions. Load at Step 3 / 3.5a, before a single caption is drafted.
 - `references/art-styles.md` — preset style menu with readability compensation tables and prompt language. Load when asking about or applying art style.
 - `references/style-metrics.json` — the machine-readable avatar size floor per style, read by `anchor.py`. When you change a `Min avatar edge` in `art-styles.md`, change it here too; the script reports any drift between the two as a failure rather than trusting either.
 
-Scripts: `normalize.py` (Step 0) · `chunk.py` (Step 1 reading plan) · `stats.py` (Step 2) · `lint_copy.py` (Step 3.5 copy review) · `skeleton.py` (Gate 2) · `measure.py` (Step 7 measurement) · `anchor.py` (Step 7) · `finalize.py` (Step 8 tile intake) · `audit_cast.py` (Step 8.5) · `review_tiles.py` (Step 8.6 tile review) · `stitch.py` (Step 9). `atlas_common.py` holds the geometry all of them share — the label plate, the caption block and the title-block footprint above all: `text_box()`, `zone_caption_geometry()`, `cartouche_rect()`. If two scripts disagree about where something is, the bug is that one of them has its own copy. Hashing is the same story for tile records: `zone_sha()` in both audit scripts covers **every cell** a zone occupies, so a regenerated cell cannot inherit a verdict written for its neighbour.
+Scripts: `normalize.py` (Step 0) · `chunk.py` (Step 1 reading plan) · `stats.py` (Step 2) · `lint_copy.py` (Step 3.5b copy measurement + voice warnings) · `skeleton.py` (Gate 2) · `measure.py` (Step 7 measurement) · `anchor.py` (Step 7) · `finalize.py` (Step 8 tile intake) · `audit_cast.py` (Step 8.5) · `review_tiles.py` (Step 8.6 tile review) · `stitch.py` (Step 9). `atlas_common.py` holds the geometry all of them share — the label plate, the caption block and the title-block footprint above all: `text_box()`, `zone_caption_geometry()`, `cartouche_rect()`. If two scripts disagree about where something is, the bug is that one of them has its own copy. Hashing is the same story for tile records: `zone_sha()` in both audit scripts covers **every cell** a zone occupies, so a regenerated cell cannot inherit a verdict written for its neighbour.

@@ -6,7 +6,10 @@
     "repo": "moux1024/moux-skills",
     "path": "skills/example-skill",
     "version": "0.1.0",
-    "tags": ["example", "template"]
+    "tags": [
+      "example",
+      "template"
+    ]
   },
   {
     "id": "wechat-miniapp-dev",
@@ -15,7 +18,11 @@
     "repo": "moux1024/moux-skills",
     "path": "skills/wechat-miniapp-dev",
     "version": "0.1.1",
-    "tags": ["wechat", "miniapp", "development"]
+    "tags": [
+      "wechat",
+      "miniapp",
+      "development"
+    ]
   },
   {
     "id": "a-share-core-stock-analysis",
@@ -24,16 +31,27 @@
     "repo": "moux1024/moux-skills",
     "path": "skills/a-share-core-stock-analysis",
     "version": "0.1.0",
-    "tags": ["stock", "china", "institution", "hs300", "investment"]
+    "tags": [
+      "stock",
+      "china",
+      "institution",
+      "hs300",
+      "investment"
+    ]
   },
   {
     "id": "novel-atlas",
     "name": "Novel Atlas",
-    "description": "Turns a full novel into one ultra-high-resolution atlas image holding its timeline, cast and irreversible events: designs a blueprint of tiled zones, generates one image per zone, then composites tiles and text into a single picture locally.",
+    "description": "Turns a full novel into one ultra-high-resolution atlas image holding its timeline, cast and irreversible events: designs a blueprint of tiled zones, writes and voice-edits the label copy before measuring it, generates one image per zone, then composites tiles and text into a single picture locally.",
     "repo": "moux1024/moux-skills",
     "path": "skills/novel-atlas",
-    "version": "0.4.0",
-    "tags": ["novel", "visualization", "image", "infographic"]
+    "version": "0.5.0",
+    "tags": [
+      "novel",
+      "visualization",
+      "image",
+      "infographic"
+    ]
   },
   {
     "id": "xhs-story",
@@ -42,6 +60,12 @@
     "repo": "moux1024/moux-skills",
     "path": "skills/xhs-story",
     "version": "1.1.0",
-    "tags": ["xiaohongshu", "rednote", "content", "social", "carousel"]
+    "tags": [
+      "xiaohongshu",
+      "rednote",
+      "content",
+      "social",
+      "carousel"
+    ]
   }
 ]
