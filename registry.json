@@ -83,5 +83,21 @@
       "editing",
       "vendor"
     ]
+  },
+  {
+    "id": "promo-atlas",
+    "name": "Promo Atlas",
+    "description": "Turns a launch brief into one persona-by-scenario master board plus per-channel deliverables (Xiaohongshu carousel, long image, Douyin vertical, WeChat Moments square, Weibo banner). Copy tone is agreed before any caption is written; every cell is gated on a sourced fact by lint_density.py; delivery pages land on exact platform pixels; finance and insurance builds carry a persistent risk disclosure band and prohibited-claim blocking.",
+    "repo": "moux1024/moux-skills",
+    "path": "skills/promo-atlas",
+    "version": "1.2.1",
+    "tags": [
+      "xiaohongshu",
+      "carousel",
+      "long-image",
+      "social",
+      "image",
+      "compliance"
+    ]
   }
 ]
