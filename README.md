@@ -1,5 +1,7 @@
 # moux-skills
 
+[English](README.md) | [简体中文](README_CN.md)
+
 Personal AI agent skills designed for direct installation from GitHub.
 
 This repository follows the common Git-based skill distribution convention:
