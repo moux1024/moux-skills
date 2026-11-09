@@ -12,6 +12,20 @@ npx skills@latest add moux1024/moux-skills/skills/example-skill
 
 一个技能（skill）就是一个包含 `SKILL.md` 文件的目录。安装器会克隆本仓库、解析请求的路径、校验 `SKILL.md`，然后把该目录复制到本地技能库。
 
+## 技能清单
+
+| 技能 | 用途 |
+|---|---|
+| [novel-atlas](skills/novel-atlas/) | 把整本小说变成一张超高清全景图：时间线、人物与不可逆事件同框，分区生成、本地拼合成单图。 |
+| [promo-atlas](skills/promo-atlas/) | 把投放 brief 变成分人群 × 场景的推广总板，并产出各渠道交付物（小红书、抖音、微信、微博），内置合规门槛。 |
+| [xhs-story](skills/xhs-story/) | 把真实的「想法 → 落地」过程按起承转合编排成 7 页小红书图文，附可直接粘贴的文案。 |
+| [a-share-core-stock-analysis](skills/a-share-core-stock-analysis/) | 用市场环境、ETF 资金、相对强弱、筹码分布与国家队成本区，解读 A 股核心持仓的机构行为。 |
+| [wechat-miniapp-dev](skills/wechat-miniapp-dev/) | 面向非专业用户的微信小程序一站式工作流：脚手架、迭代、文档、检查、发布准备。 |
+| [humanizer-zh](skills/humanizer-zh/) | 修改中文文风，去除空话与模板化表达，保留作者声音。第三方原样保留（见下文）。 |
+| [example-skill](skills/example-skill/) | 演示仓库结构的最小模板。 |
+
+按路径安装任意技能：`npx skills@latest add moux1024/moux-skills/skills/<skill-id>`。
+
 ## 目录结构
 
 ```text

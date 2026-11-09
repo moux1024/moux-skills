@@ -12,6 +12,20 @@ npx skills@latest add moux1024/moux-skills/skills/example-skill
 
 A skill is a directory that contains a `SKILL.md` file. The installer clones this repository, resolves the requested path, validates `SKILL.md`, and copies that directory into the local skill store.
 
+## Skills
+
+| Skill | What it does |
+|---|---|
+| [novel-atlas](skills/novel-atlas/) | Turns a full novel into one ultra-high-resolution atlas image: timeline, cast and irreversible events on a single tiled canvas, composited locally. |
+| [promo-atlas](skills/promo-atlas/) | Turns a launch brief into a persona-by-scenario master board plus per-channel deliverables (Xiaohongshu, Douyin, WeChat, Weibo), with compliance gating. |
+| [xhs-story](skills/xhs-story/) | Turns a real "idea → shipped" process into a 7-page Xiaohongshu carousel plus a paste-ready caption, structured as 起承转合. |
+| [a-share-core-stock-analysis](skills/a-share-core-stock-analysis/) | Reads institutional behavior on A-share core holdings through market regime, ETF flows, relative strength, chip distribution and national-team cost zones. |
+| [wechat-miniapp-dev](skills/wechat-miniapp-dev/) | One-stop WeChat Mini Program workflow for non-professional users: scaffold, iterate, document, check, release. |
+| [humanizer-zh](skills/humanizer-zh/) | Edits Chinese prose to strip filler and template phrasing while keeping the author's voice. Third-party, kept unmodified (see below). |
+| [example-skill](skills/example-skill/) | Minimal template demonstrating the repository structure. |
+
+Install any of them by path: `npx skills@latest add moux1024/moux-skills/skills/<skill-id>`.
+
 ## Layout
 
 ```text
