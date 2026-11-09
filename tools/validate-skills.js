@@ -24,6 +24,18 @@ function walk(dir, results = []) {
   return results;
 }
 
+function looksLikeUnquotedColon(value) {
+  const v = value.trim();
+  if (!v) return false;
+  // Quoted scalars and block scalars are legal; a real YAML parser owns those.
+  if (/^["']/.test(v) || /^[|>][+-]?\d*$/.test(v)) return false;
+  // In a plain scalar, ": " opens a nested mapping. Real parsers reject it with
+  // "mapping values are not allowed in this context". A line-based regex parser
+  // silently accepts it, which is how a 998-char description saying
+  // "deliverables: ..." shipped a SKILL.md that no YAML parser could read.
+  return v.includes(": ");
+}
+
 function parseFrontmatter(filePath) {
   const content = fs.readFileSync(filePath, "utf8");
   const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -35,6 +47,10 @@ function parseFrontmatter(filePath) {
   for (const line of match[1].split("\n")) {
     const pair = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
     if (pair) {
+      if (looksLikeUnquotedColon(pair[2])) {
+        fail(`${path.relative(root, filePath)}: frontmatter "${pair[1]}" has an unquoted ": " — `
+          + `YAML parsers reject this. Wrap the value in quotes or use a block scalar (>-).`);
+      }
       metadata[pair[1]] = pair[2].replace(/^["']|["']$/g, "").trim();
     }
   }
