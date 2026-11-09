@@ -1,5 +1,8 @@
 ---
 name: promo-atlas
+display_name: "社媒推广图集"
+display_name_zh: "社媒推广图集"
+display_name_en: "Promo Atlas"
 description: "Turns a launch brief into a social-media campaign set — one internal master board (persona × scenario matrix with a timeline band) plus per-platform deliverables: 小红书轮播, 小红书长图, 抖音竖版, 朋友圈方图, 微博横图, 电商主图. Cartoon art is generated per cell; the real product, logo, mascot, app screen, chart and every client-confirmed number are composited in by code; every word sits on its own plate; every platform's UI occlusion band is respected. Copy tone is agreed before a single caption is written (plain / warm / urgent / expert / witty, with a countable 煽情 budget), and a long image never exceeds 1:4. Every cell must add a sourced fact: lint_density.py blocks empty cells, facts-free rule cards and pages with too few information units. Works for physical goods and for 理财 / 保险 / 金融产品, where a risk disclosure band and prohibited-claim blocking are enforced. Use when the user wants 社媒推广图, 小红书轮播, 小红书长图, 长图推广, 新品上市总览, 人群场景矩阵图, 一张图讲清上市计划, 金融产品宣传图, 保险产品海报, 条款解读图, or a multi-channel campaign set."
 description_zh: "上市简报 → 人群×场景矩阵主图 + 各渠道成图；先定基调再写文案，每格必须新增一条可溯源事实，长图不超过 1:4"
 description_en: "Launch brief to a persona-by-scenario master board plus per-channel deliverables; tone agreed before copy, every cell gated on a sourced fact, long image capped at 1:4"
