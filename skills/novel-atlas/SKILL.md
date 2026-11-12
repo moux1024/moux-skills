@@ -1,13 +1,15 @@
 ---
 name: novel-atlas
-description: Turns a full novel into one ultra-high-resolution atlas image that holds its timeline, cast and key events, by designing a blueprint of tiled zones and stitching locally composited tiles into a single picture. A panel that needs two scenes is split by a seam and generated as two complete scenes, never marked with a pasted-on portrait. This skill should be used when the user wants a 小说全景图, 人物关系图, 剧情时间线大图, 世界观地图, 全书信息图, 人物谱, a one-image book summary, or asks to visualize an entire novel's structure without splitting it across pages. Triggers on a novel file (.txt/.md/.epub/.docx) plus a request for one big image containing the whole story.
-version: 0.6.0
+description: Turns a full novel into one ultra-high-resolution atlas image that holds its timeline, cast and key events, by designing a blueprint of tiled zones and stitching locally composited tiles into a single picture, delivered as an annotated plate and an annotation-free clean plate from one run. A panel that needs two scenes is split by a seam and generated as two complete scenes, never marked with a pasted-on portrait. This skill should be used when the user wants a 小说全景图, 人物关系图, 剧情时间线大图, 世界观地图, 全书信息图, 人物谱, a one-image book summary, or asks to visualize an entire novel's structure without splitting it across pages. Triggers on a novel file (.txt/.md/.epub/.docx) plus a request for one big image containing the whole story.
+version: 0.7.0
 agent_created: true
 ---
 
 # Novel Atlas
 
 Turn one novel into **one** ultra-high-resolution atlas image: timeline, cast and irreversible events, all inside a single canvas. Images carry the meaning; text is a thin annotation layer added locally. The output is deliberately tiled and visibly sectional — a designed map, not a seamless painting.
+
+One picture, delivered in two states: the annotated atlas, and the same canvas with the annotation withheld (`--clean-out`). They are not a draft and a final — they are the document and the artwork, and both come out of a single stitching run so they cannot disagree about anything except the words.
 
 Never produce multiple images meant to be read in sequence. Information must not break across pages.
 
@@ -362,10 +364,13 @@ Order of work, once: look at the sheet, open at full resolution every tile that 
 ### Step 9 — Stitch, label, deliver
 
 ```bash
-python3 scripts/stitch.py atlas_build/blueprint.json -d atlas_build/tiles -o atlas_build/atlas.png
+python3 scripts/stitch.py atlas_build/blueprint.json -d atlas_build/tiles \
+    -o atlas_build/atlas.png --clean-out atlas_build/atlas_clean.png
 ```
 
-The script composites tiles on the grid, crops bleed, unifies global colour temperature, draws seam dividers and split seams, draws every text element on a white plate, draws the title block and coverage note, and writes `atlas_build/stitch_report.json`.
+**Two plates ship, always.** The annotated atlas is the document; the clean plate is the same artwork with the annotation withheld — no labels, no names, no event dots, no caption plates, no title block. It is what the picture looks like as a picture: what gets printed, projected, or set with someone else's type. `--clean-out` takes the snapshot at the last line that is still structure (after colour unification, seams, split gutters, registration ticks and the border), so the pair cannot drift: one run, one colour target, one seam treatment, and the only difference between the files is the layer painted after. Do not render the clean plate in a second invocation — that is how a build ends up with two files nobody can tell apart.
+
+The script composites tiles on the grid, crops bleed, unifies global colour temperature, draws seam dividers and split seams, draws every text element on a white plate, draws the title block and coverage note, and writes `atlas_build/stitch_report.json` (`annotated: false` and a `clean_output` path when the clean plate was written).
 
 The annotation layer is one system, not a pile of labels:
 
@@ -385,7 +390,7 @@ The title block is painted **after** the labels, so a label placed where it sits
 
 Read the report. Fix and re-stitch any contrast failure, missing tile, label that straddles a split seam, or label-under-cartouche warning — do not ship it. `report.splits` lists every seam that was painted; a build with no splits and a build with twelve both deserve a second look at the picture.
 
-Deliver the final image with a short note: what it contains, which chapters are missing, and where content had to be symbolized.
+Deliver both files, `atlas.png` first — the annotated one is the answer, the clean one is the same answer without the words. Then the short note: what it contains, which chapters are missing, and where content had to be symbolized. If the two files differ by anything other than the text layer, the run is wrong; re-stitch rather than shipping a pair that disagrees with itself.
 
 ## Environment
 

@@ -82,11 +82,27 @@ def main():
     ap.add_argument("--no-color-unify", action="store_true")
     ap.add_argument("--no-events", action="store_true", help="skip event dots and connectors")
     ap.add_argument("--no-cartouche", action="store_true", help="skip title/legend block")
+    ap.add_argument("--no-text", action="store_true",
+                    help="withhold the whole annotation layer — the clean artwork plate")
+    ap.add_argument("--clean-out", default=None,
+                    help="also write the annotation-free plate to this path, from the same run")
     ap.add_argument("--allow-partial", action="store_true",
                     help="exit 0 even when tiles or contrast are unresolved (Gate 3 proof runs)")
     ap.add_argument("--report", default=None)
     ap.add_argument("--jpg-quality", type=int, default=94)
     args = ap.parse_args()
+
+    # A finished atlas ships as two plates from the same build: the annotated one, and the
+    # artwork with the annotation withheld. The second is not a courtesy copy — it is what
+    # the picture looks like as a picture, and it is the version that survives being printed,
+    # projected, or set with type by someone else. Everything drawn on top of the tiles is
+    # drawn by this script after they are pasted, so one switch is enough: `place()` draws
+    # every label, name and event caption; `paint_caption()` draws the zone plates; the
+    # avatar badges and the title block are gated separately below.
+    annotate = not args.no_text
+    if not annotate:
+        args.no_events = True
+        args.no_cartouche = True
 
     bp = ac.load_blueprint(args.blueprint)
     cv = bp["meta"]["canvas"]
@@ -104,6 +120,7 @@ def main():
         "output": os.path.abspath(args.out),
         "size": [W, H],
         "cell": cell,
+        "annotated": annotate,
         "contrast_floor": FLOOR,
         "tiles": {"expected": 0, "found": [], "missing": []},
         "contrast": {"checked": 0, "failures": []},
@@ -189,6 +206,20 @@ def main():
                               "sides": [s["id"] for s in g["sides"]]}
                         for zid, g in splits.items()}
 
+    # The plate's own border. Structure, not annotation: it is drawn before the snapshot so
+    # that the clean plate carries the same edge as the annotated one — otherwise the two
+    # deliverables differ by one hairline, and nobody can say which file is the real one.
+    draw.rectangle([1, 1, W - 2, H - 2], outline=accent + (140,),
+                   width=max(2, cell // 900))
+
+    # ---------------------------------------------------------------- clean plate snapshot
+    # Everything from here on is annotation. Seams, split gutters, registration ticks and the
+    # colour unification above are structure: they are how the twelve tiles read as one
+    # picture, and a clean plate keeps them. Copying the canvas at this exact line is what
+    # makes the two deliverables the same artwork — one run, one colour target, one seam
+    # treatment, and the only difference between them is the layer that was painted after.
+    clean_canvas = canvas.copy()
+
     # ---------------------------------------------------------------- pass 4: connectors first
     chidx = ac.chars_by_id(bp)
     epos = {}
@@ -259,7 +290,7 @@ def main():
     # now, decided at generation time, and `skeleton.py` refuses `avatar_slots` without
     # `meta.legacy_avatars` — this path exists to re-stitch old builds byte-identically.
     zone_map = ac.zone_by_id(bp)
-    if ac.legacy_avatars(bp):
+    if ac.legacy_avatars(bp) and annotate:
         for z in bp["zones"]:
             x, y, w, h = ac.zone_rect(z, cell)
             for slot in z.get("avatar_slots", []) or []:
@@ -339,7 +370,13 @@ def main():
         Default treatment is an opaque white plate under the point, black text: the plate is
         the contrast, so no label depends on the artwork behind it being kind. `"tone"` keeps
         the older measured-scrim path for builds that were designed around it.
+
+        On a clean plate this draws nothing at all: every string on the canvas reaches the
+        image through here, so withholding the annotation is one early return rather than a
+        second copy of the layout code that could drift from the first.
         """
+        if not annotate:
+            return None
         geo = ac.text_box(draw, text, px, py, px_size, anchor)
         box, text_pos = geo["box"], geo["text_pos"]
         font = geo["font"]
@@ -435,6 +472,8 @@ def main():
     # stitcher fills — the previous header was drawn by skeleton.py from its own numbers,
     # and the two disagreed often enough to approve a layout the final image then broke.
     def paint_caption(z, cap):
+        if not annotate:
+            return
         if cap.get("flipped"):
             report["warnings"].append(
                 f"zone {z['id']}: caption sits at the top — its bottom-left corner is under "
@@ -604,9 +643,6 @@ def main():
                 f"cartouche overflow: content ends at y={y}, plate bottom is {cy0 + ch_} — "
                 f"lower the body font size or shorten the coverage lines")
 
-    draw.rectangle([1, 1, W - 2, H - 2], outline=accent + (140,),
-                   width=max(2, cell // 900))
-
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
     if args.out.lower().endswith((".jpg", ".jpeg")):
         canvas.save(args.out, quality=args.jpg_quality, subsampling=1)
@@ -615,15 +651,30 @@ def main():
 
     report_path = args.report or os.path.join(os.path.dirname(os.path.abspath(args.out)),
                                               "stitch_report.json")
+
+    if args.clean_out:
+        os.makedirs(os.path.dirname(os.path.abspath(args.clean_out)) or ".", exist_ok=True)
+        if args.clean_out.lower().endswith((".jpg", ".jpeg")):
+            clean_canvas.save(args.clean_out, quality=args.jpg_quality, subsampling=1)
+        else:
+            clean_canvas.save(args.clean_out)
+        report["clean_output"] = os.path.abspath(args.clean_out)
+
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
     print(f"wrote {args.out}  ({W}x{H})")
     print(f"tiles  {len(report['tiles']['found'])}/{report['tiles']['expected']} found")
-    print(f"labels {report['contrast']['checked']} checked, "
-          f"{len(report['contrast']['failures'])} below {FLOOR}:1")
-    print(f"avatars {len(report['avatars']['cropped'])} cropped, "
-          f"{len(report['avatars']['symbol'])} symbol-only")
+    if annotate:
+        print(f"labels {report['contrast']['checked']} checked, "
+              f"{len(report['contrast']['failures'])} below {FLOOR}:1")
+        print(f"avatars {len(report['avatars']['cropped'])} cropped, "
+              f"{len(report['avatars']['symbol'])} symbol-only")
+    else:
+        print("annotation withheld — artwork only: no labels, names, event dots, "
+              "caption plates or title block")
+    if report.get("clean_output"):
+        print(f"clean  {report['clean_output']}  (same artwork, annotation withheld)")
     if report["tiles"]["missing"]:
         print("\nMISSING TILES (shown as hatched placeholders):")
         for m in report["tiles"]["missing"][:20]:
