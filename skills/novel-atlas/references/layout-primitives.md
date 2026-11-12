@@ -61,6 +61,21 @@ Two or more lanes running side by side, not touching until a specified node.
 - **Bad at**: convergence of many threads; two lanes are the practical limit
 - **Adjacency**: every crossing point must be an event with a label, never accidental
 
+## Panel split — a second scene inside one zone
+
+Not a primitive: a device that lives *inside* a zone. When one panel has to show something that is not the place it is standing in, the panel is divided by one seam into two complete scenes, both generated in the same tile.
+
+**Use it when** the second thing is a different moment, a different place, or a different camera — an order given in another room, the same street forty years apart, a crowd where one body matters.
+
+**Do not use it when** the fact is only "they were also part of this" — that is a label — or when the tile already draws the character, in which case the answer is to draw nothing extra.
+
+- **Seam corner to corner.** A shallow diagonal looks fine in a diagram and leaves a wedge too thin for a half-body figure. Each half needs roughly a quarter of the panel as usable rectangle, which a corner-to-corner seam gives and a shallow one does not.
+- **Two scenes, one scale.** Both halves sit at the same viewing distance. A wide establishing shot above a close-up below reads as a mistake, not a cut.
+- **The seam is the composition's own edge.** Each half should already have its own ground plane and light; if the light direction disagrees across the seam, it stops being a cut and becomes two pictures glued together.
+- **At most two.** A third scene in one cell makes each region smaller than a caption plate.
+
+The reason this replaces the older cropped-head marker: a crop carries a face and nothing else, so it cannot show a place, an action or a body — and where the panel already drew that character it repeats the picture at a fraction of its size.
+
 ## Step 3 — Compose
 
 1. **One primary primitive owns more than half the canvas.** A canvas split evenly between two primitives reads as two pictures glued together.

@@ -57,7 +57,6 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
       "caption": "禁军教头的日常",
       "caption_side": "bottom",
       "characters": ["c_linchong"],
-      "avatar_slots": [],
       "cast": { "named": [ {"character": "c_linchong", "figures": 1, "prominence": "full"} ],
                 "extras_max": 2, "extras_note": "禁军巡卒，不给脸" },
       "labels": [
@@ -90,6 +89,8 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
 
 **`meta.cartouche_plate`** — `"white"` (default) or `"dark"` for the title block's plate.
 
+**`meta.legacy_avatars`** — `true` only for an archived build, to re-stitch it unchanged. It re-enables `avatar_slots` and the circular crop in `stitch.py`. Never set it on a new blueprint: a cropped head is a badge, and a badge over a scene the tile already drew is the one thing this format cannot explain away.
+
 **`structure`** — the four features from `references/layout-primitives.md`. Mandatory; they are the audit trail for why the layout looks the way it does.
 
 **`primitives`** — exactly one `"primary"` with `weight > 0.5`, at most two `"secondary"`. `rationale` is for the Gate 1 conversation, and it is not optional — a primitive without a reason is a decoration.
@@ -101,7 +102,7 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
 - `hit_rate` and `turning_points` come from `stats.py`, not from judgement. Keep them in the file — they are what makes the tier auditable.
 - `home_zone`: where the one full-body depiction lives. A T1's portrait box must be inside this zone.
 - `anchor`: five fields, all required. At least two must be silhouette-level, i.e. recognisable at 100px.
-- `portrait.box`: `[x, y, w, h]` in home-zone fraction. **This is the crop rectangle for every remote avatar, and it is a head, not a figure.** Two requirements the scripts enforce: it must be square on the canvas (`w*zone_w == h*zone_h`, because the stitcher force-fits it into a circle), and its pixel side must clear both the style's minimum avatar edge and the largest size the character is drawn at anywhere else. Write an estimate at blueprint time, then settle it in Step 7 against the real tile — `anchor.py` prints the numbers and the corrections.
+- `portrait.box`: `[x, y, w, h]` in home-zone fraction. **It is a head, not a figure** — it marks where the face is, and the home figure's name plate hangs under its bottom edge. Archived builds (`meta.legacy_avatars`) crop this box into a circle, and only for them is it required to be square on the canvas and large enough to survive each place the character appeared; `anchor.py` reports both. In a current build nothing crops it, so a non-square box is a warning: usually a standing figure written where a head was meant.
 - `body`: the character's hardware, in the text's own terms — which limb was replaced and with what, whether the cranium opens, what the eye does, whether any skin is left. This is what goes into the zone prompt's `[BODY]` block. `body_en` is the same thing in the prompt's language; a Chinese `body` inside an English prompt gets obeyed inconsistently and sometimes renders as glyphs.
 - `body` is per character, but a character's body changes with the era. When a zone shows them at a different age or in a different chassis, override it **on that zone's cast entry**, not here: `zones[].cast.named[].body`.
 - `expression`: `{ "key", "print", "note" }`. `key` names the face from the style's expression grammar (`references/art-styles.md`; for bricks: `factory_smile`, `smirk`, `aghast`, `cry`, `unhinged`, `menace`, `deadpan`, `worry`, `stare`, `off`, `misregistered`, `blank`). `print` is the stroke-level description that goes verbatim into `[FACE]` — brows, eyes, pupils, mouth, marks — written as print geometry, never as muscle. `note` records the line of text that justifies it. A character whose expression cannot be traced to the text keeps `factory_smile`: the default head is a statement about them, not a missing value.
@@ -115,7 +116,7 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
 **`zones[]`**
 - `col`/`row`/`w`/`h`: cell rectangle. Zones must tile the canvas exactly, no gaps, no overlaps. `skeleton.py` fails on both.
 - `duty`: one sentence. If it needs two, the zone is doing two jobs and should be split. **Internal only** — it appears in the skeleton so the reviewer can judge intent, never on the finished image. It is also the claim `review_tiles.py` prints above each tile at Step 8.6, so a duty written as a mood ("压抑的城市感") makes the tile unfalsifiable: write the thing that should be visible ("它第一次自己抬起手"), and the review has something to fail.
-- `caption`: optional, **reader-facing**. One short line under the zone name, in the panel's caption plate. This is the only editorial text a viewer sees besides labels, so keep it concrete: it says what this panel shows, not how the reader should feel. Two lines maximum at `cell × 0.78` width, and `lint_copy.py` fails anything longer. It is also fifteen characters of prose in a format that has no other prose, which is where machine-written copy is most visible — write it against `references/copy-voice.md` (Step 3.5a) before the plate is measured, not after.
+- `caption`: optional, **reader-facing**. One short line under the zone name, in the panel's caption plate. This is the only editorial text a viewer sees besides labels, so keep it concrete: it says what this panel shows, not how the reader should feel. Two lines maximum at `cell × 0.78` width, and `lint_copy.py` fails anything longer. **Not printed on a zone with `split`** — that panel is captioned per half, and a panel caption there is copy nobody sees (`lint_copy.py` says so). It is also fifteen characters of prose in a format that has no other prose, which is where machine-written copy is most visible — write it against `references/copy-voice.md` (Step 3.5a) before the plate is measured, not after.
 - `caption_side`: optional per-zone override of `meta.zone_caption_side`, for a panel whose bottom corner belongs to the title block.
 - `tonal`: `light` | `dark` | `mid`. Only used when `meta.label_plate` is `"tone"`: it picks the scrim direction for the zone. With white plates it is inert and can be left in place as a record of the zone's brightness.
 - `hide_name`: optional `true` to suppress the zone name (for zones that are pure atmosphere).
@@ -128,10 +129,24 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
             "extras_max": 0,
             "extras_note": "" }
   ```
-  `prominence` is `full`, `mid`, or `prop` (an object standing in for a non-humanoid character — it is counted separately and never as a figure). `extras_max` caps **faceless** background figures; `extras_note` says what they are allowed to be. Every id in `characters` and `avatar_slots` must appear in `cast.named`, and `skeleton.py` fails when one does not — the whitelist has to be the same list the artwork is audited against, or the audit is theatre. A face outside this list fails Step 8.5.
-- `avatar_slots`: remote appearances. `size` is a fraction of the zone's shorter side. These are cropped from the home tile — they are never generated.
+  `prominence` is `full`, `mid`, or `prop` (an object standing in for a non-humanoid character — it is counted separately and never as a figure). `extras_max` caps **faceless** background figures; `extras_note` says what they are allowed to be. Every id in `characters`, `split.sides[].named` and `avatar_slots` must appear in `cast.named`, and `skeleton.py` fails when one does not — the whitelist has to be the same list the artwork is audited against, or the audit is theatre. A face outside this list fails Step 8.5.
+- `split`: a second scene inside this panel. One straight seam, two complete scenes, both generated in the same tile.
+  ```json
+  "split": {
+    "from": [0, 1], "to": [1, 0],
+    "sides": [
+      { "id": "racks", "at": [0.22, 0.22], "name": "序列 · 第二至第十二",
+        "caption": "同一份记忆，十一具身体", "named": ["c_wuzu"] },
+      { "id": "one",   "at": [0.78, 0.78], "name": "其中一具",
+        "caption": "每一具都叫向山", "named": ["c_ninth"] }
+    ]
+  }
+  ```
+  `from` / `to` are the seam's endpoints in zone fractions, y down. `sides` is exactly two, and each side declares a hint point `at` **on its own half** rather than a name — "left" and "above" are the words two people disagree about on a diagonal, and the disagreement would be silent; two hints that land on the same side fail the run. Each side carries its own `name` and `caption` (a split zone's own caption is never printed) and optionally `named`, the characters drawn in that half.
+  Run the seam **corner to corner**. A shallow seam leaves one half a wedge that cannot hold a half-body figure or a caption, and the inscribed-rectangle test fails it — each half needs at least 18% of the panel.
+- `avatar_slots`: **retired.** A cropped head carries no body, ground or action, so it reads as a badge pasted on the artwork — and where the tile already drew that character it restates the panel at a fifth of its size. `skeleton.py` fails a blueprint that still declares one. Archived builds set `meta.legacy_avatars: true` to re-stitch unchanged.
 - `labels`: `anchor` is `cb` (centre-below, the default — text hangs under the point), `ct` (centre-top), `lt` (left-top), `lm` (left-middle) or `rm` (right-middle). `size` for a 2048 cell; the stitcher scales it. Labels are single-line by design: a label wider than 92% of its zone is a label that runs into the neighbour, and `lint_copy.py` fails it rather than letting it wrap somewhere unexpected. **No plate may overlap the caption plate or the title block** — `skeleton.py` reports the collision and the label moves; the caption does not.
-- `prompt`: the full self-contained zone prompt, in the five-part order given in SKILL.md.
+- `prompt`: the full self-contained zone prompt, in the block order given in SKILL.md. A zone with `split` adds the `[PANEL SPLIT]` block — the seam endpoints in words, one sentence per half, and the explicit forbidding of circular vignettes, medallions, badges and inset frames. Image models reach for a round vignette whenever they are asked to put two things in one frame, and that is exactly the artefact this format exists to avoid.
 
 **`coverage`** — the honesty block. `chapters_covered` may be omitted if `chapters_total` and `chapters_missing` are both given. Whatever is omitted must appear in a `*_missing` array, and the cartouche prints it on the final image.
 
@@ -141,11 +156,13 @@ The single file the scripts consume. Coordinates are **zone-local, normalised 0�
 |---|---|---|
 | Zones tile the grid exactly | `skeleton.py` | Gaps become black bands; overlaps paste twice |
 | Every event's zone exists | `skeleton.py` | Dot silently dropped |
-| Every T1 has `portrait.box` | `skeleton.py` warns, `stitch.py` degrades | Remote avatars become symbols |
-| `portrait.box` stays inside its home zone | `skeleton.py` | Crop reads the neighbouring zone's pixels |
-| `portrait.box` is square on the canvas | `skeleton.py`, `anchor.py` | Face arrives squashed into the circle |
-| Crop side ≥ the style's min avatar edge | `anchor.py` | Face is gone at display size |
-| Crop side ≥ the largest remote display size | `anchor.py` | Upscaled blur, worse than a symbol |
+| Every T1 has `portrait.box` | `skeleton.py` | The name plate has no face to hang under |
+| `portrait.box` stays inside its home zone | `skeleton.py` | The name plate lands in the neighbouring zone |
+| `portrait.box` is square | `skeleton.py` (warning; error when `legacy_avatars`) | Usually a standing figure written as a head |
+| No `avatar_slots` unless `meta.legacy_avatars` | `skeleton.py` | A badge where a scene belongs |
+| `split` has two sides, both hints on opposite sides | `skeleton.py` | One scene and an empty half |
+| Each split half ≥ 18% of the panel | `skeleton.py` | A wedge with no room for a body or a caption |
+| No dot or label straddles a split seam | `skeleton.py`, `stitch.py` | The element reads as belonging to both scenes |
 | No two text plates overlap | `skeleton.py`, `stitch.py` | Two sentences painted on each other — opaque plates make it unreadable, not faint |
 | Every label clears 4.5:1 | `stitch.py` | White plate: 18:1, the check confirms the plate was painted. `tone` mode: measured per label |
 | Copy fits the geometry it will occupy | `lint_copy.py` | A caption that needs a third line lands on the plate below it |
@@ -163,7 +180,9 @@ Both scripts exit non-zero on failure. Treat non-zero as "not done", not as a wa
 ## Common authoring mistakes
 
 - **Portrait box set from the skeleton.** The skeleton has no artwork; a box that passes geometry can still frame a shoulder. Square it at Gate 2, then put it on the face in Step 7 using the contact sheet.
-- **A standing figure written as a portrait box.** `[0.3, 0.26, 0.18, 0.34]` describes a body. The avatar is cut from the head alone — roughly the top quarter — and the stitcher will squash whatever it is given into a circle.
+- **A standing figure written as a portrait box.** `[0.3, 0.26, 0.18, 0.34]` describes a body; the box is meant to frame the head.
+- **A second scene expressed as a marker.** A circle with a name under it is a UI badge: no body, no ground, no action, and in the panels that already drew that character it says the same thing twice. Use `split`, or delete the marker.
+- **A shallow split seam.** `[0, 0.42] → [1, 0.95]` looks like a diagonal and leaves the lower half 5% of the panel. Corner to corner, or do not split.
 - **Zone duty written as a title.** "第 3 区" is not a duty. A duty says what the reader should conclude from that region.
 - **Seam reasons invented to satisfy the validator.** A seam with a fake reason is worse than no seam — it draws a divider across a continuous scene.
 - **`cell` lowered to fit a bigger grid.** Shrinking cells to add zones defeats the whole resolution argument. Cut zones instead.

@@ -2,6 +2,7 @@
 """Shared geometry, typography and contrast helpers for the novel-atlas scripts."""
 
 import json
+import math
 import os
 
 from PIL import Image, ImageDraw, ImageFont
@@ -250,7 +251,9 @@ def _anchor_box(draw, text, px, py, size, anchor):
     return text_box(draw, text, px, py, size, anchor)["box"]
 
 
-def zone_caption_geometry(bp, zone, cell, draw, avoid=None):
+def zone_caption_geometry(bp, zone, cell, draw, avoid=None, frame=None,
+                          name=None, caption=None, scale=1.0, side=None, align="left",
+                          hide_name=None):
     """A zone's name and caption as one plate under the picture.
 
     The caption is part of the layout, not an afterthought: it is the one piece of
@@ -263,20 +266,30 @@ def zone_caption_geometry(bp, zone, cell, draw, avoid=None):
     the one block on the canvas that is guaranteed to be painted last. Both the skeleton and
     the stitcher call this with the same rect, so the band the user approves at Gate 2 is
     the band that ships.
+
+    `frame` overrides the zone rect, and `name` / `caption` override the zone's own strings.
+    That is how a split panel's two halves get their own plate: same layout code, one half's
+    inscribed rectangle instead of the whole panel, a smaller `scale` because two names now
+    share one frame. `align` picks which vertical edge the block hugs — the far corner from
+    the seam, which is where the scene leaves its negative space.
     """
-    x, y, w, h = zone_rect(zone, cell)
-    f_name = resolve_font(max(10, int(round(62 * cell / 2048.0))))
-    f_cap = resolve_font(max(10, int(round(30 * cell / 2048.0))))
+    x, y, w, h = frame or zone_rect(zone, cell)
+    name = zone.get("name") if name is None else name
+    caption = zone.get("caption") if caption is None else caption
+    if hide_name is None:
+        hide_name = bool(zone.get("hide_name"))
+    f_name = resolve_font(max(10, int(round(62 * cell / 2048.0 * scale))))
+    f_cap = resolve_font(max(10, int(round(30 * cell / 2048.0 * scale))))
     pad_x = int(round(f_name.size * 0.42))
     pad_y = int(round(f_name.size * 0.22))
-    margin = int(round(w * 0.022))
-    max_text_w = int(w * 0.78) - 2 * pad_x
+    margin = int(round(w * 0.022)) if frame is None else int(round(min(w, h) * 0.030))
+    max_text_w = int(w * 0.90) - 2 * pad_x
 
     lines = []
-    if zone.get("name") and not zone.get("hide_name"):
-        lines.append((str(zone["name"]), f_name, "name"))
-    if zone.get("caption"):
-        for sub in wrap_cjk(draw, str(zone["caption"]), f_cap, max_text_w)[:3]:
+    if name and not hide_name:
+        lines.append((str(name), f_name, "name"))
+    if caption:
+        for sub in wrap_cjk(draw, str(caption), f_cap, max_text_w)[:3]:
             lines.append((sub, f_cap, "caption"))
     if not lines:
         return None
@@ -285,9 +298,9 @@ def zone_caption_geometry(bp, zone, cell, draw, avoid=None):
     line_h = [int(f.size * (1.34 if kind == "name" else 1.52)) for _, f, kind in lines]
     total_h = sum(line_h) + 2 * pad_y
 
-    side = str(zone.get("caption_side")
+    side = str(side or zone.get("caption_side")
                or (bp.get("meta") or {}).get("zone_caption_side", "bottom")).lower()
-    left = x + margin
+    left = (x + w - margin - block_w) if align == "right" else (x + margin)
     top = (y + margin) if side == "top" else (y + h - margin - total_h)
     rect = (left, top, left + block_w, top + total_h)
 
@@ -303,7 +316,8 @@ def zone_caption_geometry(bp, zone, cell, draw, avoid=None):
         placed.append((text, font, kind, cy))
         cy += lh
 
-    return {"rect": rect, "lines": placed, "pad": pad_x, "side": side, "flipped": flipped}
+    return {"rect": rect, "lines": placed, "pad": pad_x, "side": side, "flipped": flipped,
+            "frame": (x, y, w, h)}
 
 
 def cartouche_rect(bp, cell, draw=None):
@@ -314,7 +328,8 @@ def cartouche_rect(bp, cell, draw=None):
 
 
 
-def event_label_pos(draw, text, ex, ey, cell, zrect, avoid=None, taken=None, prefer="below"):
+def event_label_pos(draw, text, ex, ey, cell, zrect, avoid=None, taken=None, prefer="below",
+                    split=None):
     """Where an event's label goes. First fit wins: below, above, right, left.
 
     Below is the default because a label above the dot covers the thing the dot is pointing
@@ -325,6 +340,7 @@ def event_label_pos(draw, text, ex, ey, cell, zrect, avoid=None, taken=None, pre
     The dot stays the anchor in every case; only the side the plate hangs on changes, so the
     leader line still points at something. `avoid` / `taken` are rects (or lists of them) the
     plate must not land on: the zone caption, the title block, and the plates already placed.
+    `split` adds one more refusal: a plate the seam runs under belongs to neither scene.
     """
     size = cell * 0.020
     r = cell * 0.016
@@ -351,8 +367,11 @@ def event_label_pos(draw, text, ex, ey, cell, zrect, avoid=None, taken=None, pre
             fallback = (px, py, anchor)
         inside = (box[0] >= zx and box[2] <= zx + zw
                   and box[1] >= zy and box[3] <= zy + zh)
-        if inside and not any(rects_overlap(box, b) for b in blocks):
-            return px, py, anchor
+        if not inside or any(rects_overlap(box, b) for b in blocks):
+            continue
+        if split is not None and box_on_seam(split, box):
+            continue
+        return px, py, anchor
     return fallback
 
 
@@ -380,10 +399,18 @@ def label_boxes(bp, cell):
 
     for z in bp["zones"]:
         x, y, w, h = zone_rect(z, cell)
-        cap = zone_caption_geometry(bp, z, cell, draw, avoid=cart)
-        if cap:
-            out.append((z["id"], "caption",
-                        " / ".join(str(t) for t, _, _, _ in cap["lines"]), cap["rect"]))
+        if split_of(z):
+            # A split panel is captioned per half; its own name would be a third plate on a
+            # picture that already has two. The zone name survives in Gate 1 and the copy
+            # sheet, which is where it is read as a whole.
+            for cap in split_caption_geometries(bp, z, cell, draw, avoid=cart):
+                out.append((z["id"], "caption",
+                            " / ".join(str(t) for t, _, _, _ in cap["lines"]), cap["rect"]))
+        else:
+            cap = zone_caption_geometry(bp, z, cell, draw, avoid=cart)
+            if cap:
+                out.append((z["id"], "caption",
+                            " / ".join(str(t) for t, _, _, _ in cap["lines"]), cap["rect"]))
         for lb in z.get("labels") or []:
             text = str(lb.get("text", ""))
             if not text:
@@ -396,6 +423,7 @@ def label_boxes(bp, cell):
                                     lb.get("anchor", "cb"))))
 
     chidx = chars_by_id(bp)
+    legacy = legacy_avatars(bp)
     for z in bp["zones"]:
         x, y, w, h = zone_rect(z, cell)
         for cid in z.get("characters") or []:
@@ -409,6 +437,8 @@ def label_boxes(bp, cell):
             out.append((z["id"], "name", name,
                         _anchor_box(draw, name, bx + bw * 0.5, by + bh + cell * 0.012,
                                     30 * cell / 2048.0, "ct")))
+        if not legacy:
+            continue
         for slot in z.get("avatar_slots") or []:
             ch = chidx.get(slot.get("character")) or {}
             size = max(24, int(float(slot.get("size", 0.08)) * min(w, h)))
@@ -431,8 +461,9 @@ def label_boxes(bp, cell):
         ex = zrect[0] + float(e.get("x", 0.5)) * zrect[2]
         ey = zrect[1] + float(e.get("y", 0.5)) * zrect[3]
         text = str(e.get("label", ""))
-        zc = zone_caption_geometry(bp, z, cell, draw, avoid=cart)
-        avoid = [cart] + ([zc["rect"]] if zc else [])
+        zc = (split_caption_geometries(bp, z, cell, draw, avoid=cart) if split_of(z)
+              else [zone_caption_geometry(bp, z, cell, draw, avoid=cart)])
+        avoid = [cart] + [c["rect"] for c in zc if c]
         px, py, anchor = event_label_pos(draw, text, ex, ey, cell, zrect, avoid, taken,
                                        e.get("label_side", "below"))
         box = _anchor_box(draw, text, px, py, cell * 0.020, anchor)
@@ -443,6 +474,203 @@ def label_boxes(bp, cell):
 
 def rects_overlap(a, b):
     return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+# ------------------------------------------------------------------ panel split
+#
+# A second scene inside one panel used to be a cropped head pasted in a circle. A crop can
+# only ever carry a head — no body, no ground, no action — so the reader saw a badge, not a
+# scene, and the panel ended up saying the same thing twice. A split panel is the honest
+# version: the same cell is generated with two complete scenes divided by one seam, each
+# holding half-body figures. Everything below is the geometry of that seam, shared by the
+# skeleton and the stitcher for the same reason every other plate is shared.
+
+def split_of(zone):
+    s = zone.get("split")
+    return s if isinstance(s, dict) and s.get("from") and s.get("to") else None
+
+
+def _cross(p0, p1, p):
+    return (p1[0] - p0[0]) * (p[1] - p0[1]) - (p1[1] - p0[1]) * (p[0] - p0[0])
+
+
+def _sign(p0, p1, p):
+    c = _cross(p0, p1, p)
+    return 0 if abs(c) < 1e-9 else (1 if c > 0 else -1)
+
+
+def _dist_to_seam(p0, p1, p):
+    dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+    length = math.hypot(dx, dy) or 1.0
+    return abs(_cross(p0, p1, p)) / length
+
+
+def split_geometry(zone, cell):
+    """The seam in atlas pixels, and which half-plane each declared side owns.
+
+    A side is authored as a hint point (`at`), not a name. "Left" and "above" are exactly
+    the words two people disagree about on a diagonal, and the disagreement would be
+    silent; a hint point cannot be misread, and it doubles as a check — if both hints land
+    on the same side of the segment, the seam does not divide the panel the way its author
+    thought, and `skeleton.py` fails the run instead of shipping it.
+    """
+    s = split_of(zone)
+    if not s:
+        return None
+    x, y, w, h = zone_rect(zone, cell)
+    f, t = s["from"], s["to"]
+    p0 = (x + float(f[0]) * w, y + float(f[1]) * h)
+    p1 = (x + float(t[0]) * w, y + float(t[1]) * h)
+    sides = []
+    for sd in s.get("sides") or []:
+        at = sd.get("at") or [0.5, 0.5]
+        hint = (x + float(at[0]) * w, y + float(at[1]) * h)
+        sides.append({"id": sd.get("id"), "decl": sd, "hint": hint,
+                      "sign": _sign(p0, p1, hint)})
+    return {"from": p0, "to": p1, "rect": (x, y, w, h), "sides": sides,
+            "gap": int(max(3, round(cell * 0.0055))), "decl": s}
+
+
+def side_at(geo, px, py):
+    """Which declared side a point falls on, or None when the point sits on the seam."""
+    sg = _sign(geo["from"], geo["to"], (px, py))
+    if sg == 0:
+        return None
+    for s in geo["sides"]:
+        if s["sign"] == sg:
+            return s
+    return None
+
+
+def seam_distance(geo, p):
+    """Perpendicular distance from a point to the seam, in atlas pixels."""
+    return _dist_to_seam(geo["from"], geo["to"], p)
+
+
+def box_on_seam(geo, box, margin=None):
+    """True when a plate touches the seam, so it would read as belonging to neither scene.
+
+    All four corners on one side is the pass condition; a plate that merely *ends* near the
+    seam is not a problem, a plate the seam runs under is. `margin` widens the failure so a
+    plate hugging the rule is caught too — the seam is drawn as a gutter, and a plate that
+    shares that gutter looks glued to the wrong half.
+    """
+    m = geo["gap"] * 1.4 if margin is None else margin
+    pts = [(box[0], box[1]), (box[2], box[1]), (box[0], box[3]), (box[2], box[3])]
+    signs = {_sign(geo["from"], geo["to"], p) for p in pts}
+    if len(signs) > 1 or 0 in signs:
+        return True
+    return min(_dist_to_seam(geo["from"], geo["to"], p) for p in pts) < m
+
+
+def inscribed_rect(geo, side, steps=56, shrink=0.030):
+    """Largest axis-aligned rectangle inside one half of a split panel.
+
+    A maximal axis-aligned rectangle inside a triangle is tight against one of its
+    vertices, and each half of a split panel contains at least one zone corner — so the
+    search only has to grow from the four zone corners and keep the corners on the right
+    side of the seam. The winner is reported with its anchor corner: that corner is the
+    point farthest from the seam, which is where a painter leaves the negative space and
+    therefore where the half's caption belongs.
+    """
+    x, y, w, h = geo["rect"]
+    best = None
+    corners = ((x, y, 1, 1), (x + w, y, -1, 1), (x, y + h, 1, -1), (x + w, y + h, -1, -1))
+    for cx, cy, dx, dy in corners:
+        if _sign(geo["from"], geo["to"], (cx, cy)) != side["sign"]:
+            continue
+        for i in range(1, steps + 1):
+            ws = w * i / float(steps)
+            lo, hi = 0.0, float(h)
+            for _ in range(20):
+                hs = (lo + hi) / 2.0
+                probe = [(cx + dx * ws, cy + dy * hs),
+                         (cx + dx * ws, cy), (cx, cy + dy * hs)]
+                if all(_sign(geo["from"], geo["to"], p) == side["sign"] for p in probe):
+                    lo = hs
+                else:
+                    hi = hs
+            if lo <= 0:
+                continue
+            area = ws * lo
+            if best is None or area > best["area"]:
+                best = {"area": area, "w": ws, "h": lo, "dx": dx, "dy": dy,
+                        "corner": (cx, cy)}
+    if not best:
+        return None
+    pad_x, pad_y = best["w"] * shrink, best["h"] * shrink
+    x0 = best["corner"][0] + (pad_x if best["dx"] > 0 else -pad_x - 0)
+    x1 = x0 + best["w"] - 2 * pad_x
+    y0 = best["corner"][1] + (pad_y if best["dy"] > 0 else -pad_y)
+    y1 = y0 + best["h"] - 2 * pad_y
+    if best["dx"] < 0:
+        x0, x1 = best["corner"][0] - best["w"] + pad_x, best["corner"][0] - pad_x
+    if best["dy"] < 0:
+        y0, y1 = best["corner"][1] - best["h"] + pad_y, best["corner"][1] - pad_y
+    return {"rect": (int(x0), int(y0), int(x1), int(y1)),
+            "corner": best["corner"], "area": best["area"],
+            "align": "right" if best["dx"] < 0 else "left",
+            "side": "bottom" if best["dy"] < 0 else "top",
+            "share": best["area"] / float(w * h)}
+
+
+def split_caption_geometries(bp, zone, cell, draw, avoid=None):
+    """One caption plate per declared side, laid out inside that side's own rectangle.
+
+    The panel's own name stays a panel name — it still says what the whole cell is. What a
+    split adds is one line per scene, because two scenes without labels is a picture the
+    reader has to guess at, and guessing is the thing an atlas exists to remove.
+    """
+    geo = split_geometry(zone, cell)
+    if not geo:
+        return []
+    out = []
+    for side in geo["sides"]:
+        ins = inscribed_rect(geo, side)
+        if not ins:
+            continue
+        decl = side["decl"]
+        fx0, fy0, fx1, fy1 = ins["rect"]
+        cap = zone_caption_geometry(bp, zone, cell, draw, avoid=avoid,
+                                    frame=(fx0, fy0, fx1 - fx0, fy1 - fy0),
+                                    name=decl.get("name"), caption=decl.get("caption"),
+                                    scale=0.80, side=ins["side"], align=ins["align"],
+                                    hide_name=bool(decl.get("hide_name")))
+        if cap:
+            cap["side_id"] = side["id"]
+            cap["inscribed"] = ins
+            out.append(cap)
+    return out
+
+
+def draw_seam_gutter(draw, geo, k=1.0, accent=(166, 61, 47)):
+    """Paint the division between two scenes, at atlas scale or preview scale.
+
+    A dark gutter with a hairline either side, deliberately one weight below a zone seam:
+    the zone seam is the atlas's structure, a panel split is one panel's internal cut, and
+    two dividers of equal weight make the second read as an extra row of the atlas.
+    """
+    p0 = (geo["from"][0] * k, geo["from"][1] * k)
+    p1 = (geo["to"][0] * k, geo["to"][1] * k)
+    dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+    length = math.hypot(dx, dy) or 1.0
+    nx, ny = -dy / length, dx / length
+    draw.line([p0, p1], fill=(0, 0, 0, 170), width=max(2, int(geo["gap"] * k)))
+    off = max(1.0, geo["gap"] * k / 2.0)
+    for s in (1, -1):
+        draw.line([(p0[0] + s * nx * off, p0[1] + s * ny * off),
+                   (p1[0] + s * nx * off, p1[1] + s * ny * off)],
+                  fill=tuple(accent) + (190,), width=max(1, int(round(k))))
+
+
+def legacy_avatars(bp):
+    """Whether this build still uses the 0.5-era cropped-head avatars.
+
+    They are not removed from the code — an archived build has to keep stitching the same
+    picture — but no new blueprint may use them. `skeleton.py` refuses `avatar_slots`
+    without this flag, so the downgrade is a decision someone writes down, not a habit.
+    """
+    return bool((bp.get("meta") or {}).get("legacy_avatars"))
 
 
 # ------------------------------------------------------------------ contrast

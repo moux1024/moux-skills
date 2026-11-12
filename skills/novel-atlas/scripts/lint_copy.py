@@ -185,7 +185,37 @@ def main():
         elif not z.get("hide_name"):
             cp.err(f"{zid} 分区名", "没有名字，也没有声明 hide_name")
 
-        if z.get("caption"):
+        sp = ac.split_of(z)
+        if sp:
+            # A split panel is captioned per half, measured inside that half's own
+            # rectangle — the geometry comes from atlas_common so the copy review and the
+            # stitcher cannot disagree about how much room a half-scene caption has.
+            for cap in ac.split_caption_geometries(bp, z, cell, draw):
+                frame_w = cap["frame"][2]
+                for text, font, kind, _ty in cap["lines"]:
+                    if kind == "name":
+                        lines = [text]
+                        maxw, limit, size = frame_w * 0.90, 1, font.size
+                    else:
+                        maxw = frame_w * 0.90 - 2 * font.size * 0.42
+                        lines = ac.wrap_cjk(draw, text, font, maxw)
+                        limit, size = 3, font.size
+                    widest = max((ac.text_width(draw, ln, font) for ln in lines), default=0)
+                    where = f"{z['id']} 分镜{cap.get('side_id')} " + \
+                            ("名" if kind == "name" else "副题")
+                    check_text(cp, where, kind, text, len(lines), limit, widest, maxw, size)
+                    cp.records.append({"where": z["id"], "kind": f"split-{kind}",
+                                       "side": cap.get("side_id"), "text": text,
+                                       "size": size, "lines": lines})
+            for side in (sp.get("sides") or []):
+                if str(side.get("name") or "").strip() == str(z.get("name") or "").strip():
+                    cp.err(f"{z['id']} 分镜{side.get('id')}",
+                           "半边名和分区名一字不差——一块板里两处同一个名字")
+            if z.get("caption"):
+                cp.warn("分镜", f"{z['id']} 分区副题",
+                        "分了镜的分区不印分区副题，只印半边的；这一行不会出现在图上")
+
+        elif z.get("caption"):
             text = str(z["caption"])
             font = ac.resolve_font(int(f_cap))
             maxw = w * 0.78 - 2 * f_name * 0.46
@@ -368,7 +398,13 @@ def main():
         A("")
         for r in recs:
             label = {"name": "分区名", "caption": "副题", "label": "标注",
-                     "event": "事件", "title": "标题", "subtitle": "副标题"}.get(r["kind"], r["kind"])
+                     "event": "事件", "title": "标题", "subtitle": "副标题",
+                     "split-name": "半边名", "split-caption": "半边副题"}.get(
+                         r["kind"], r["kind"])
+            if r.get("side"):
+                label = f"{label}（{r['side']}）"
+            elif r["kind"] == "name" and ac.split_of(z):
+                label = "分区名（不印）"
             extra = f"，{len(r['lines'])} 行" if len(r["lines"]) > 1 else ""
             A(f"- **{label}**　{r['text']}　`{len(r['text'])} 字 · {r['size']:.0f}px{extra}`")
         A("")

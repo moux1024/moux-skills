@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import math
 import os
 import sys
 
@@ -26,6 +27,100 @@ def dashed_rect(draw, box, colour, width=2, dash=14, gap=10):
     for y in range(y0, y1, dash + gap):
         draw.line([(x0, y), (x0, min(y + dash, y1))], fill=colour, width=width)
         draw.line([(x1, y), (x1, min(y + dash, y1))], fill=colour, width=width)
+
+
+def check_split(z, bp):
+    """Everything about a split panel that can be settled before a tile is paid for."""
+    problems, warnings = [], []
+    s = ac.split_of(z)
+    if not s:
+        return problems, warnings
+    if ac.legacy_avatars(bp):
+        problems.append(f"zone {z['id']}: has both `split` and meta.legacy_avatars — "
+                        f"the two are different answers to the same question")
+    for key in ("from", "to"):
+        p = s.get(key)
+        if not (isinstance(p, (list, tuple)) and len(p) == 2):
+            problems.append(f"zone {z['id']}: split.{key} must be [x, y] in zone fractions")
+            return problems, warnings
+        if not (0 <= float(p[0]) <= 1 and 0 <= float(p[1]) <= 1):
+            problems.append(f"zone {z['id']}: split.{key} {p} leaves the zone")
+
+    geo = ac.split_geometry(z, full_cell_of(bp))
+    dx, dy = geo["to"][0] - geo["from"][0], geo["to"][1] - geo["from"][1]
+    seam_len = math.hypot(dx, dy)
+    w, h = geo["rect"][2], geo["rect"][3]
+    if seam_len < 0.35 * math.hypot(w, h):
+        problems.append(
+            f"zone {z['id']}: the seam is {seam_len / math.hypot(w, h):.0%} of the panel "
+            f"diagonal — it cuts a corner off instead of dividing the panel into two scenes")
+
+    sides = s.get("sides") or []
+    if len(sides) != 2:
+        problems.append(f"zone {z['id']}: a split needs exactly 2 sides, found {len(sides)}")
+        return problems, warnings
+    signs = [sd for sd in geo["sides"]]
+    if len({sd["sign"] for sd in signs}) != 2:
+        problems.append(
+            f"zone {z['id']}: both side hints (`at`) land on the same side of the seam — "
+            f"the picture would be one scene with an empty half. Move one hint across")
+        return problems, warnings
+
+    names = {}
+    for side in geo["sides"]:
+        decl = side["decl"]
+        sid = side["id"] or "?"
+        ins = ac.inscribed_rect(geo, side)
+        if not ins:
+            problems.append(f"zone {z['id']} / {sid}: that half holds no rectangle — "
+                            f"nothing can be composed or captioned there")
+            continue
+        if ins["share"] < 0.18:
+            problems.append(
+                f"zone {z['id']} / {sid}: that half is {ins['share']:.0%} of the panel; "
+                f"under 18% it cannot hold a half-body figure, let alone a caption")
+        if not (decl.get("name") or decl.get("caption")):
+            problems.append(
+                f"zone {z['id']} / {sid}: no name and no caption — the reader gets two "
+                f"scenes and no way to tell which is which")
+        elif str(decl.get("name") or decl.get("caption")).strip() in names:
+            problems.append(
+                f"zone {z['id']}: sides {names[str(decl.get('name') or decl.get('caption'))]} "
+                f"and {sid} carry the same text")
+        else:
+            names[str(decl.get("name") or decl.get("caption")).strip()] = sid
+        for cid in decl.get("named") or []:
+            if cid not in cidx_local(bp):
+                problems.append(f"zone {z['id']} / {sid}: unknown character '{cid}'")
+            elif not ac.legacy_avatars(bp) and cid not in \
+                    [n.get("character") for n in ((z.get("cast") or {}).get("named") or [])] \
+                    and (z.get("cast") or {}).get("named"):
+                problems.append(
+                    f"zone {z['id']} / {sid}: '{cid}' is drawn in this half but is not in "
+                    f"the zone's cast.named — the audit has no list to check it against")
+
+    if z.get("caption"):
+        warnings.append(
+            f"zone {z['id']}: has a panel caption, but a split panel is captioned per half — "
+            f"that line is never printed. Move it into one of the sides")
+    if z.get("avatar_slots"):
+        problems.append(f"zone {z['id']}: a split panel replaces avatar_slots, it does not "
+                        f"add to them — delete the slots")
+    return problems, warnings
+
+
+def full_cell_of(bp):
+    return int(bp["meta"]["canvas"]["cell"])
+
+
+def cidx_local(bp):
+    return ac.chars_by_id(bp)
+
+
+def draw_seam(draw, geo, k, accent):
+    """The gutter between two scenes. Shared with the stitcher — see `atlas_common`."""
+    ac.draw_seam_gutter(draw, geo, k, accent)
+
 
 
 def main():
@@ -56,6 +151,7 @@ def main():
     draw = ImageDraw.Draw(img, "RGBA")
 
     problems = []
+    warnings = []
     f_zone = ac.resolve_font(max(14, int(cell * 0.062)))
     f_small = ac.resolve_font(max(11, int(cell * 0.032)))
     f_tiny = ac.resolve_font(max(10, int(cell * 0.026)))
@@ -90,10 +186,25 @@ def main():
         pcol = ac.PRIMITIVE_COLORS.get(z.get("primitive", ""), (120, 120, 120))
         draw.rectangle([x, y, x + w - 1, y + h - 1], fill=pcol + (38,))
         draw.rectangle([x, y, x + w - 1, y + h - 1], outline=pcol + (235,), width=3)
-        cap = ac.zone_caption_geometry(bp, z, full_cell, meas, avoid=cart_rect)
-        if cap:
-            draw_caption_block(z, cap)
-            caption_boxes.append((z["id"], f"{z['id']} caption", cap["rect"]))
+        sp, sw = check_split(z, bp)
+        problems.extend(sp)
+        warnings.extend(sw)
+        split = ac.split_of(z)
+        if split:
+            # Two scenes, one panel: the seam is drawn where the tile generation will be
+            # asked to put it, and each half gets its own plate at the corner farthest
+            # from the seam — the same rectangles stitch.py fills.
+            geo = ac.split_geometry(z, full_cell)
+            draw_seam(draw, geo, k, accent)
+            for cap in ac.split_caption_geometries(bp, z, full_cell, meas, avoid=cart_rect):
+                draw_caption_block(z, cap)
+                caption_boxes.append((z["id"], f"{z['id']} {cap.get('side_id')}",
+                                      cap["rect"]))
+        else:
+            cap = ac.zone_caption_geometry(bp, z, full_cell, meas, avoid=cart_rect)
+            if cap:
+                draw_caption_block(z, cap)
+                caption_boxes.append((z["id"], f"{z['id']} caption", cap["rect"]))
         # duty — design intent, not printed on the final image. Off by default so this
         # view previews exactly what the reader will see; bottom-edge seam chips would
         # otherwise cut through the sentence.
@@ -181,8 +292,8 @@ def main():
                 bx, by = x + w * 0.5 - bw / 2, y + h * 0.55 - bh / 2
                 if not box:
                     problems.append(
-                        f"character {ch['name']}: no portrait.box — the home tile will be "
-                        f"cropped by guesswork, remote avatars will point at the wrong pixels")
+                        f"character {ch['name']}: no portrait.box — the name plate has no "
+                        f"face to hang under, and the figure will be labelled by guesswork")
             dashed_rect(draw, (bx, by, bx + bw, by + bh), (255, 255, 255, 190), width=2)
             # Name goes under the figure, not above it: above collides with the zone's
             # caption plate as soon as portrait.box.y is near its top edge.
@@ -199,25 +310,33 @@ def main():
                 problems.append(
                     f"character {ch['name']}: home_zone {ch['home_zone']} but placed in zone {z['id']}")
 
-            # Geometry only. Whether the crop lands on the face and whether it holds enough
-            # pixel both need the artwork, and belong to anchor.py after the style proof.
+            # Geometry only. Whether the box lands on the face needs the artwork, and
+            # belongs to `anchor.py` when this build still crops portraits out of it.
             if box and len(box) == 4:
                 fx, fy, fw, fh = [float(v) for v in box]
                 if fx < 0 or fy < 0 or fx + fw > 1.0001 or fy + fh > 1.0001:
                     problems.append(
                         f"character {ch['name']}: portrait.box leaves its home zone "
-                        f"{z['id']} — the crop would read the neighbouring zone's pixels")
+                        f"{z['id']} — the name plate would land in the neighbouring zone")
                 if fh > 0 and abs((fw * w) / (fh * h) - 1.0) > 0.05:
-                    problems.append(
-                        f"character {ch['name']}: portrait.box is {fw * w:.0f}x{fh * h:.0f}px, "
-                        f"not square — stitch.py force-fits it into a circle, so the face "
-                        f"arrives squashed. A standing figure is not a portrait box; "
-                        f"square it by hand or with `anchor.py --write-back`")
+                    if ac.legacy_avatars(bp):
+                        problems.append(
+                            f"character {ch['name']}: portrait.box is "
+                            f"{fw * w:.0f}x{fh * h:.0f}px, not square — stitch.py "
+                            f"force-fits it into a circle, so the face arrives squashed. "
+                            f"A standing figure is not a portrait box; square it by hand "
+                            f"or with `anchor.py --write-back`")
+                    else:
+                        warnings.append(
+                            f"character {ch['name']}: portrait.box is not square "
+                            f"({fw * w:.0f}x{fh * h:.0f}px). Nothing crops it any more, so "
+                            f"this is legal — but it is usually a standing figure written "
+                            f"where a head was meant, and the name plate will hang low")
 
     # --- cast whitelist
-    # One authority for who may be drawn in a zone. Both the home characters and the remote
-    # avatars must appear here, and the prompt repeats the count, so a tile that invents a
-    # bystander is contradicted by the blueprint instead of quietly accepted.
+    # One authority for who may be drawn in a zone, and the prompt repeats the count, so a
+    # tile that invents a bystander is contradicted by the blueprint instead of quietly
+    # accepted.
     for z in zones:
         cast = z.get("cast") or {}
         named = cast.get("named") or []
@@ -235,42 +354,58 @@ def main():
         for slot in z.get("avatar_slots", []) or []:
             if slot.get("character") not in ids:
                 problems.append(
-                    f"zone {z['id']}: remote avatar '{slot.get('character')}' is not in cast.named")
+                    f"zone {z['id']}: avatar slot '{slot.get('character')}' is not in cast.named")
 
-    # --- remote avatars
-    for z in zones:
-        x, y, w, h = ac.zone_rect(z, cell)
-        for slot in z.get("avatar_slots", []) or []:
-            cid = slot.get("character")
-            ch = cidx.get(cid)
-            name = ch.get("name", cid) if ch else cid
-            if not ch:
-                problems.append(f"zone {z['id']}: avatar slot for unknown character '{cid}'")
-            elif ch.get("faceless"):
-                problems.append(
-                    f"zone {z['id']}: {name} is faceless — a remote avatar would have to "
-                    f"invent a face the book never gives; draw the prop instead")
-            elif not (ch.get("portrait") or {}).get("box"):
-                problems.append(
-                    f"zone {z['id']}: remote avatar for {name} has no home portrait.box — "
-                    f"it will fall back to a symbol marker")
-            size = max(18, int(float(slot.get("size", 0.08)) * min(w, h)))
-            cx = x + float(slot.get("x", 0.5)) * w
-            cy = y + float(slot.get("y", 0.5)) * h
-            draw.ellipse([cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2],
-                         outline=(255, 255, 255, 200), width=2)
-            # Name under the circle, centred: beside it, a tight cluster of four avatars
-            # pushes each caption into its neighbour.
-            ntw = ac.text_width(draw, name, f_tiny)
-            nlx = cx - ntw / 2
-            nly = cy + size / 2 + int(cell * 0.010)
-            if nly + f_tiny.size * 1.2 > y + h - 4:       # no room below: sit above
-                nly = cy - size / 2 - int(cell * 0.010) - f_tiny.size * 1.2
-            draw.rectangle([nlx - 3, nly - 2, nlx + ntw + 3, nly + f_tiny.size * 1.3],
-                           fill=(255, 255, 255, 245), outline=(0, 0, 0, 50))
-            draw.text((nlx, nly), name, font=f_tiny, fill=(22, 22, 22, 255))
-            char_boxes.append((z["id"], name, (nlx, nly,
-                                              nlx + ntw, nly + int(f_tiny.size * 1.2))))
+    # --- avatar slots: archived builds only
+    # A cropped head cannot carry a body, a ground or an action, so it reads as a badge
+    # pasted on the artwork rather than a scene — and it duplicates whatever the tile
+    # already drew. A second scene in one panel is now a `split`. The legacy path stays so
+    # an archived build can be re-stitched identically, but it has to be asked for.
+    legacy = ac.legacy_avatars(bp)
+    stale = [z["id"] for z in zones if (z.get("avatar_slots") or []) and not legacy]
+    if stale:
+        n = sum(len(z.get("avatar_slots") or []) for z in zones if z["id"] in stale)
+        problems.append(
+            f"{len(stale)} zone(s) still carry `avatar_slots` ({n} slots: {', '.join(stale)}). "
+            f"A cropped head is a badge, not a second scene — first check whether the tile "
+            f"already draws that character (then delete the slot), then whether the second "
+            f"appearance is a different moment or place (then declare `split`), and only "
+            f"otherwise leave it as text. To re-stitch an archived build unchanged, set "
+            f"meta.legacy_avatars: true")
+    if legacy:
+        for z in zones:
+            x, y, w, h = ac.zone_rect(z, cell)
+            for slot in z.get("avatar_slots", []) or []:
+                cid = slot.get("character")
+                ch = cidx.get(cid)
+                name = ch.get("name", cid) if ch else cid
+                if not ch:
+                    problems.append(f"zone {z['id']}: avatar slot for unknown character '{cid}'")
+                elif ch.get("faceless"):
+                    problems.append(
+                        f"zone {z['id']}: {name} is faceless — a remote avatar would have to "
+                        f"invent a face the book never gives; draw the prop instead")
+                elif not (ch.get("portrait") or {}).get("box"):
+                    problems.append(
+                        f"zone {z['id']}: remote avatar for {name} has no home portrait.box — "
+                        f"it will fall back to a symbol marker")
+                size = max(18, int(float(slot.get("size", 0.08)) * min(w, h)))
+                cx = x + float(slot.get("x", 0.5)) * w
+                cy = y + float(slot.get("y", 0.5)) * h
+                draw.ellipse([cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2],
+                             outline=(255, 255, 255, 200), width=2)
+                # Name under the circle, centred: beside it, a tight cluster of four avatars
+                # pushes each caption into its neighbour.
+                ntw = ac.text_width(draw, name, f_tiny)
+                nlx = cx - ntw / 2
+                nly = cy + size / 2 + int(cell * 0.010)
+                if nly + f_tiny.size * 1.2 > y + h - 4:       # no room below: sit above
+                    nly = cy - size / 2 - int(cell * 0.010) - f_tiny.size * 1.2
+                draw.rectangle([nlx - 3, nly - 2, nlx + ntw + 3, nly + f_tiny.size * 1.3],
+                               fill=(255, 255, 255, 245), outline=(0, 0, 0, 50))
+                draw.text((nlx, nly), name, font=f_tiny, fill=(22, 22, 22, 255))
+                char_boxes.append((z["id"], name, (nlx, nly,
+                                                  nlx + ntw, nly + int(f_tiny.size * 1.2))))
 
     # --- events and connectors
     epos = {}
@@ -294,14 +429,28 @@ def main():
         # the preview cannot disagree with the painted image about which side it went.
         txt = e.get("label", "")
         zfull = ac.zone_rect(z, full_cell)
-        cap = ac.zone_caption_geometry(bp, z, full_cell, meas, avoid=cart_rect)
-        avoid = [cart_rect] + ([cap["rect"]] if cap else [])
+        sgeo = ac.split_geometry(z, full_cell)
+        if sgeo:
+            cap = ac.split_caption_geometries(bp, z, full_cell, meas, avoid=cart_rect)
+            avoid = [cart_rect] + [c["rect"] for c in cap]
+        else:
+            cap = ac.zone_caption_geometry(bp, z, full_cell, meas, avoid=cart_rect)
+            avoid = [cart_rect] + ([cap["rect"]] if cap else [])
+        if sgeo:
+            fx = zfull[0] + float(e.get("x", 0.5)) * zfull[2]
+            fy = zfull[1] + float(e.get("y", 0.5)) * zfull[3]
+            # A dot on the seam belongs to neither scene, and its leader line then points
+            # at a gutter. Cheaper to move the dot now than to explain it later.
+            if ac.seam_distance(sgeo, (fx, fy)) < sgeo["gap"] * 1.6:
+                problems.append(
+                    f"event {e.get('id')}: its dot sits on the split seam in {z['id']} — "
+                    f"the event belongs to one of the two scenes, not to the gutter")
         px, py, anc = ac.event_label_pos(meas, txt,
                                          zfull[0] + float(e.get("x", 0.5)) * zfull[2],
                                          zfull[1] + float(e.get("y", 0.5)) * zfull[3],
                                          full_cell, zfull, avoid,
                                          [b[2] for b in (caption_boxes + char_boxes)],
-                                         e.get("label_side", "below"))
+                                         e.get("label_side", "below"), split=sgeo)
         geo = ac.text_box(meas, txt, px, py, full_cell * 0.020, anc)
         bx0, by0, bx1, by1 = [v * k for v in geo["box"]]
         draw.rectangle([bx0, by0, bx1, by1], fill=(255, 255, 255, 255), outline=(0, 0, 0, 60))
@@ -325,12 +474,17 @@ def main():
     boxes = list(caption_boxes) + list(event_boxes) + list(char_boxes)
     for z in zones:
         x, y, w, h = ac.zone_rect(z, cell)
+        sgeo = ac.split_geometry(z, full_cell)
         for lb in z.get("labels", []) or []:
             text = lb.get("text", "")
             geo = ac.text_box(meas, text, x + float(lb.get("x", 0.5)) * w,
                               y + float(lb.get("y", 0.5)) * h,
                               float(lb.get("size", 40)) * cell / 2048.0,
                               lb.get("anchor", "cb"))
+            if sgeo and ac.box_on_seam(sgeo, geo["box"]):
+                problems.append(
+                    f"zone {z['id']}: label 「{text[:14]}」 straddles the split seam — "
+                    f"it would read as belonging to both scenes. Move it into one half")
             bx0, by0, bx1, by1 = geo["box"]
             draw.rectangle([bx0, by0, bx1, by1], fill=(255, 255, 255, 245),
                            outline=(0, 0, 0, 60))
@@ -425,6 +579,10 @@ def main():
     print(f"wrote {args.out}  ({img.width}x{img.height})")
     print(f"zones {len(zones)}  events {len(bp.get('events', []))}  "
           f"labels {len(boxes)}  characters {len(bp.get('characters', []))}")
+    if warnings:
+        print(f"\n{len(warnings)} warning(s) — legal, but read them:")
+        for wmsg in warnings:
+            print("  · " + wmsg)
     if problems:
         print(f"\n{len(problems)} PROBLEM(S) — fix before Gate 3:")
         for p in problems:

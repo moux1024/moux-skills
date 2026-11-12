@@ -1,7 +1,7 @@
 ---
 name: novel-atlas
-description: Turns a full novel into one ultra-high-resolution atlas image that holds its timeline, cast and key events, by designing a blueprint of tiled zones and stitching locally composited tiles into a single picture. This skill should be used when the user wants a 小说全景图, 人物关系图, 剧情时间线大图, 世界观地图, 全书信息图, 人物谱, a one-image book summary, or asks to visualize an entire novel's structure without splitting it across pages. Triggers on a novel file (.txt/.md/.epub/.docx) plus a request for one big image containing the whole story.
-version: 0.5.0
+description: Turns a full novel into one ultra-high-resolution atlas image that holds its timeline, cast and key events, by designing a blueprint of tiled zones and stitching locally composited tiles into a single picture. A panel that needs two scenes is split by a seam and generated as two complete scenes, never marked with a pasted-on portrait. This skill should be used when the user wants a 小说全景图, 人物关系图, 剧情时间线大图, 世界观地图, 全书信息图, 人物谱, a one-image book summary, or asks to visualize an entire novel's structure without splitting it across pages. Triggers on a novel file (.txt/.md/.epub/.docx) plus a request for one big image containing the whole story.
+version: 0.6.0
 agent_created: true
 ---
 
@@ -14,7 +14,7 @@ Never produce multiple images meant to be read in sequence. Information must not
 ## Non-negotiable rules
 
 1. **AI draws, code writes.** Generated tiles contain zero text. Every character name, event title, date and connector label is composited by `scripts/stitch.py`. Never ask an image model to render text, and never ship text that appeared inside a generated tile.
-2. **One home, one full body.** A T1 character gets exactly one full-body depiction, in its home zone. Everywhere else the character appears only as an avatar cropped by code from that home tile. Regenerating the same character in another zone is forbidden by default. The crop is a **square box on the face**, and it must be large enough to survive the smallest place that character appears — both are verified by script before the batch runs, not discovered in the finished image.
+2. **One home, one full body; a second scene is a split, never a crop.** A T1 character gets exactly one full-body depiction, in its home zone. When another panel genuinely needs that character on screen, the panel is **split**: one seam, two complete scenes, figures drawn to the waist, generated that way in one tile. Never paste a cropped head — a crop can only carry a face, so it lands as a badge floating over artwork that in half the cases already draws the same character, and the panel ends up saying one thing twice at two sizes. Check the cheap answers first: if the tile already draws them, delete the marker; if the fact is "they were also part of this", it is a label, not a picture. `avatar_slots` is retired (archived builds may re-enable it with `meta.legacy_avatars`).
 3. **Structure picks layout, not genre.** Infer four structural features from the text, then compose layout primitives. Genre is a prior, never a determinant. See `references/layout-primitives.md`.
 4. **Selection is tiered and capped.** T1 ≤ 12, T2 ≤ 40. Omission is allowed; silent omission is not — the blueprint must report coverage gaps to the user.
 5. **Seams are designed, not faded.** Zones are separated by explicit dividers. No feathering: feathering two unrelated pictures only produces a dirty band.
@@ -101,6 +101,7 @@ Each zone prompt must be self-contained — it goes to an image model that sees 
 [BODY — who is in this frame, and what their body is made of, taken from the text]
 [FACE — how each named face is printed, in stroke geometry (object styles only)]
 [CAST — exactly how many named figures, and the cap on faceless extras]
+[PANEL SPLIT — only for a split zone: the seam, and what is on each side of it]
 [COMPOSITION — subject placement, depth, negative space reserved for labels]
 [CONTINUITY — what crosses each open edge, described explicitly]
 [READABILITY COMPENSATION — copied from the style table]
@@ -119,9 +120,34 @@ Four of those blocks are what stop the model from drawing a generic scene with i
 
 Two caveats, both learned the hard way. First, **the percentage alone does not pin the head**: models anchor a figure by its feet and grow it upward, so "70% of frame height" silently pushes the crown into the top edge regardless of what you said the head should do. The reliable form is a pair of absolute endpoints — "feet at y 0.90, crown just below y 0.24" — plus one sentence reserving the band above it ("the top fifth is empty, no head, no hair, no prop"). Second, **the crown drifts, the feet do not**: budgets that assume a clean top margin fail on the first tile. Leave at least 4% clearance between the requested crown and the zone-title baseline, and settle the real box from the proof tile rather than from arithmetic.
 
-The number is not a matter of taste. The avatar crop is roughly 1.3× the head height, and a head is about 1/7.5 of a standing body, so the box side works out to `cell × share × 0.17`. At a 2048 cell that means a character occupying **40% of the frame height still clears the most demanding style on the menu (watercolour, 140px)**; 55–70% is comfortable. Below 40%, no prompt wording saves the face — either bring the character closer or accept that they cannot appear remotely.
+The number is not a matter of taste. A head is about 1/7.5 of a standing body, so at a 2048 cell a figure occupying **40% of the frame height** is the floor at which the face still reads when the atlas is viewed whole; 55–70% is comfortable. Below 40%, no prompt wording saves the face — bring the character closer, or decide they are a half-body elsewhere (see the split below).
 
 Because of that arithmetic, a distant figure is not a smaller depiction of a character, it is a different design decision. Say so at Gate 1 rather than discovering it at stitch time.
+
+**A second scene gets a split, not a marker.** When a panel has to show something that is not the place it is standing in — the same character at another time, an order given in another room, a crowd where one body matters — the panel is divided by one seam into two complete scenes. Three answers, in this order, and only the third costs a generation:
+
+1. **The tile already draws them.** Delete the marker. A badge over a figure the picture already contains is the panel saying the same thing twice, once at 700px and once at 170px.
+2. **The fact is "they were also part of this."** That is a label on the timeline, not a picture.
+3. **A different moment, place or camera.** Declare `split`: two sides, one seam, two full scenes.
+
+The `[PANEL SPLIT]` block is then mandatory and is worth more than the other three lines combined, because image models reach for a circular vignette whenever they are asked to put two things in one frame:
+
+```
+[PANEL SPLIT]
+Divide the frame with one straight diagonal, corner to corner, from the bottom-left
+corner to the top-right corner — a single hard seam, not a fade.
+Above the seam: <scene A — place, light, what happens, in one sentence>.
+Below the seam: <scene B — place, light, what happens, in one sentence>.
+Both halves are complete scenes at the same scale, running off their own edges;
+each has its own ground plane and its own light source consistent with the other.
+Figures appear from the waist up in both halves, never smaller.
+No circular vignette, no medallion, no badge, no cut-out head, no inset frame,
+no border around either half, no second frame edge anywhere in the image.
+```
+
+Two geometry rules, both enforced by `skeleton.py` before a tile is paid for. **Run the seam corner to corner.** A shallow seam leaves one half too thin to hold a half-body figure or a caption plate — the inscribed-rectangle test fails it, usually at 5–10% of the panel. **The seam is the composition's diagonal, not a decoration**: it passes near two opposite corners, so each half is roughly a triangle and each gets about a quarter of the panel as usable rectangle.
+
+Each side carries its own name and caption, laid out automatically at the corner of its half farthest from the seam — that corner is where the composition should already be leaving negative space. Do not also write a panel caption; a split zone's own caption is never printed (`lint_copy.py` warns).
 
 Labels default to a **plate under the subject**, not an overlay on it: `meta.label_plate` is `"white"` unless a build deliberately opts into the older measured scrim (`"tone"`). Leave it alone. Pick `meta.zone_caption_side` (`"bottom"` by default) only if the bottom of every panel is unusable — and let the per-zone `caption_side` override handle the panels where the title block sits, rather than flipping the whole grid.
 
@@ -192,13 +218,15 @@ Renders the blueprint as a local flat diagram: zone blocks, standing boxes, even
 
 Show it. The user judges density, balance, sight lines, dead space and label collisions here. It also verifies the coordinate system — a mistake found now costs nothing, the same mistake found after 12 tiles costs the run.
 
-The script exits non-zero and lists problems when the grid has gaps or overlaps, a plate collides with another plate or with the title block, an event points at an unknown zone, a portrait box leaves its home zone, a portrait box is not square, or a remote avatar has no home portrait to crop from. Fix every item and re-run; do not hand a skeleton with reported problems to the user.
+The script exits non-zero and lists problems when the grid has gaps or overlaps, a plate collides with another plate or with the title block, an event points at an unknown zone, a portrait box leaves its home zone, a split seam does not divide the panel into two usable halves (both hints on the same side, a half under 18% of the panel), a dot or a label straddles a split seam, or a zone still declares the retired `avatar_slots`. Fix every item and re-run; do not hand a skeleton with reported problems to the user.
+
+A split panel is drawn with its seam and both half-plates, so the approval at this gate is approval of the composition the tile will be generated into. If the two halves do not read as two scenes here, they will not read as two scenes after generation either.
 
 The preview draws the annotation layer the way the stitcher will: white plates with black text, a caption plate under each panel, event labels below their dots. Plates and caption blocks are measured at the atlas's **real** cell and scaled to the preview, not measured at preview scale — the same text wrapped at 420px breaks in different places and produces boxes that are off by a few percent, which is enough to invent one collision and hide another. The title block's footprint is drawn as a dashed box: it is painted last, so anything inside it is lost, and a caption whose bottom corner falls under it flips to the top of its panel (the stitcher prints a warning naming the zone). Write `caption_side: "top"` on that zone to make the flip deliberate.
 
 Because every plate is opaque now, a collision is two sentences painted over each other rather than a faint smear — the check is worth reading properly rather than skimming.
 
-The two portrait checks are geometry only — they can be made without artwork, which is why they belong here rather than after the style proof. A tall box is almost always a standing figure mistaken for a head; `anchor.py --write-back` squares it, or write a square by hand.
+A portrait box that is not square is a warning here, not an error: nothing crops it any more. It is still worth reading, because a tall box is usually a standing figure written where a head was meant, and the name plate then hangs at waist level.
 
 ### Step 6 — Gate 3: style proof
 
@@ -216,13 +244,15 @@ For an object-medium style, ask three more questions before approving it, becaus
 
 Any "no" means the medium was abandoned, not that the style missed. Fix the `[FACE]` block and re-roll this one zone — approving it because the rest of the frame is right is how a dozen tiles inherit a doll face.
 
-### Step 7 — Anchor calibration
+### Step 7 — Anchor calibration (archived builds only)
+
+**Skip this step unless `meta.legacy_avatars` is true.** It calibrates `portrait.box` so the circle cropped from a home tile lands on the face. With avatars retired there is no crop: `portrait.box` only marks where a home figure's name plate hangs, and there is nothing to calibrate.
 
 ```bash
 python3 scripts/anchor.py atlas_build/blueprint.json -t atlas_build/tiles -o atlas_build/anchors
 ```
 
-Every remote avatar in the atlas is one crop of one home tile. A wrong box does not damage one zone, it damages every zone that character appears in — so it is settled while it is still one tile, not after twelve.
+Every remote avatar in an archived atlas is one crop of one home tile. A wrong box does not damage one zone, it damages every zone that character appears in — so it is settled while it is still one tile, not after twelve.
 
 The contact sheet shows, per T1: the home tile with the crop rectangle on it, the crop as it will actually be pasted (circular, square-fitted), and the numbers — crop size, the largest size this character is drawn elsewhere, the style's minimum edge.
 
@@ -335,14 +365,15 @@ Order of work, once: look at the sheet, open at full resolution every tile that 
 python3 scripts/stitch.py atlas_build/blueprint.json -d atlas_build/tiles -o atlas_build/atlas.png
 ```
 
-The script composites tiles on the grid, crops bleed, unifies global colour temperature, draws seam dividers, crops and pastes home portraits as remote avatars, draws every text element on a white plate, draws the title block and coverage note, and writes `atlas_build/stitch_report.json`.
+The script composites tiles on the grid, crops bleed, unifies global colour temperature, draws seam dividers and split seams, draws every text element on a white plate, draws the title block and coverage note, and writes `atlas_build/stitch_report.json`.
 
 The annotation layer is one system, not a pile of labels:
 
 | element | where it goes | why |
 |---|---|---|
 | zone caption | a plate under the panel, name line + caption | a caption belongs under the picture; it is the first thing read and the last thing legible when a dark scrim sits on artwork |
-| portrait / avatar name | centred under the box or the circle | a name above a head collides with the caption plate and covers the crown |
+| split-half caption | a plate at the corner of that half farthest from the seam | that corner is where the scene leaves negative space; mid-panel is where the subject is |
+| portrait name | centred under the box | a name above a head collides with the caption plate and covers the crown |
 | event label | under the dot, centred | the dot marks the point; text above it covers the thing the dot points at |
 | free label | under its declared point (`anchor: cb`) | same rule, same plate |
 
@@ -352,7 +383,7 @@ Black on white is 18:1 by construction, so the 4.5:1 floor stops being a fight a
 
 The title block is painted **after** the labels, so a label placed where it sits is sliced in half by its edge. Every overlap is named in `report.warnings` — `label under the cartouche: '…' at [x,y]`, and `label collision: '…' vs '…'` for two labels that landed on each other. The fix is to move that label in the blueprint — the event's `x`/`y`, or the zone label — never to nudge the block. Moving the label by hand keeps its marker dot and connector line together; the stitcher must not silently shift text, or a leader line ends up pointing at nothing.
 
-Read the report. Fix and re-stitch any contrast failure, missing tile, unresolved avatar or label-under-cartouche warning — do not ship it.
+Read the report. Fix and re-stitch any contrast failure, missing tile, label that straddles a split seam, or label-under-cartouche warning — do not ship it. `report.splits` lists every seam that was painted; a build with no splits and a build with twelve both deserve a second look at the picture.
 
 Deliver the final image with a short note: what it contains, which chapters are missing, and where content had to be symbolized.
 
@@ -373,6 +404,6 @@ python3 -m pip install pillow
 - `references/blueprint-schema.md` — the exact JSON contract consumed by the scripts. Load when writing or debugging a blueprint.
 - `references/copy-voice.md` — how the reader-facing copy gets written: the nine `humanizer-zh` patterns that survive at plate scale, the four tells this format has and prose does not, the plate grammar for each surface, and a worked rewrite of twelve real captions. Load at Step 3 / 3.5a, before a single caption is drafted.
 - `references/art-styles.md` — preset style menu with readability compensation tables and prompt language. Load when asking about or applying art style.
-- `references/style-metrics.json` — the machine-readable avatar size floor per style, read by `anchor.py`. When you change a `Min avatar edge` in `art-styles.md`, change it here too; the script reports any drift between the two as a failure rather than trusting either.
+- `references/style-metrics.json` — the machine-readable avatar size floor per style, read by `anchor.py` on archived builds. When you change a `Min avatar edge` in `art-styles.md`, change it here too; the script reports any drift between the two as a failure rather than trusting either.
 
-Scripts: `normalize.py` (Step 0) · `chunk.py` (Step 1 reading plan) · `stats.py` (Step 2) · `lint_copy.py` (Step 3.5b copy measurement + voice warnings) · `skeleton.py` (Gate 2) · `measure.py` (Step 7 measurement) · `anchor.py` (Step 7) · `finalize.py` (Step 8 tile intake) · `audit_cast.py` (Step 8.5) · `review_tiles.py` (Step 8.6 tile review) · `stitch.py` (Step 9). `atlas_common.py` holds the geometry all of them share — the label plate, the caption block and the title-block footprint above all: `text_box()`, `zone_caption_geometry()`, `cartouche_rect()`. If two scripts disagree about where something is, the bug is that one of them has its own copy. Hashing is the same story for tile records: `zone_sha()` in both audit scripts covers **every cell** a zone occupies, so a regenerated cell cannot inherit a verdict written for its neighbour.
+Scripts: `normalize.py` (Step 0) · `chunk.py` (Step 1 reading plan) · `stats.py` (Step 2) · `lint_copy.py` (Step 3.5b copy measurement + voice warnings) · `skeleton.py` (Gate 2) · `measure.py` (Step 7 measurement, archived builds) · `anchor.py` (Step 7, archived builds) · `finalize.py` (Step 8 tile intake) · `audit_cast.py` (Step 8.5) · `review_tiles.py` (Step 8.6 tile review) · `stitch.py` (Step 9). `atlas_common.py` holds the geometry all of them share — the label plate, the caption block and the title-block footprint above all: `text_box()`, `zone_caption_geometry()`, `cartouche_rect()`, `split_geometry()`, `inscribed_rect()`, `split_caption_geometries()`. If two scripts disagree about where something is, the bug is that one of them has its own copy. Hashing is the same story for tile records: `zone_sha()` in both audit scripts covers **every cell** a zone occupies, so a regenerated cell cannot inherit a verdict written for its neighbour.

@@ -174,6 +174,21 @@ def main():
             draw.line([(px - tick, py), (px + tick, py)], fill=ink + (90,), width=2)
             draw.line([(px, py - tick), (px, py + tick)], fill=ink + (90,), width=2)
 
+    # ---------------------------------------------------------------- split seams
+    # A panel that holds two scenes is divided by one seam, generated as part of the tile.
+    # The rule is painted here so that every split panel in the atlas is cut the same way,
+    # for the same reason zone seams are drawn by code: a divider improvised per tile is
+    # the fastest way to make one atlas look like twelve pictures.
+    splits = {}
+    for z in bp["zones"]:
+        geo = ac.split_geometry(z, cell)
+        if geo:
+            splits[z["id"]] = geo
+            ac.draw_seam_gutter(draw, geo, 1.0, accent)
+    report["splits"] = {zid: {"from": list(g["from"]), "to": list(g["to"]),
+                              "sides": [s["id"] for s in g["sides"]]}
+                        for zid, g in splits.items()}
+
     # ---------------------------------------------------------------- pass 4: connectors first
     chidx = ac.chars_by_id(bp)
     epos = {}
@@ -237,62 +252,69 @@ def main():
                               fill=ink + (80,), width=max(2, int(cell * 0.0022)))
 
     # ---------------------------------------------------------------- pass 5: remote avatars
+    # Archived builds only. A cropped head carries no body, no ground and no action, so it
+    # lands as a badge pasted on the artwork: the reader sees a portrait that belongs to no
+    # scene, and in half the panels the tile had already drawn that character, so the badge
+    # restates the picture at a fifth of its size. A second scene in one panel is a `split`
+    # now, decided at generation time, and `skeleton.py` refuses `avatar_slots` without
+    # `meta.legacy_avatars` — this path exists to re-stitch old builds byte-identically.
     zone_map = ac.zone_by_id(bp)
-    for z in bp["zones"]:
-        x, y, w, h = ac.zone_rect(z, cell)
-        for slot in z.get("avatar_slots", []) or []:
-            cid = slot.get("character")
-            ch = chidx.get(cid)
-            name = ch.get("name", cid) if ch else cid
-            if not ch:
-                report["avatars"]["missing"].append({"character": cid, "zone": z["id"],
-                                                     "reason": "unknown character"})
-                continue
-            port = ch.get("portrait") or {}
-            home = zone_map.get(port.get("zone") or ch.get("home_zone"))
-            box = port.get("box")
-            size = max(24, int(float(slot.get("size", 0.08)) * min(w, h)))
-            cx = x + float(slot.get("x", 0.5)) * w
-            cy = y + float(slot.get("y", 0.5)) * h
+    if ac.legacy_avatars(bp):
+        for z in bp["zones"]:
+            x, y, w, h = ac.zone_rect(z, cell)
+            for slot in z.get("avatar_slots", []) or []:
+                cid = slot.get("character")
+                ch = chidx.get(cid)
+                name = ch.get("name", cid) if ch else cid
+                if not ch:
+                    report["avatars"]["missing"].append({"character": cid, "zone": z["id"],
+                                                         "reason": "unknown character"})
+                    continue
+                port = ch.get("portrait") or {}
+                home = zone_map.get(port.get("zone") or ch.get("home_zone"))
+                box = port.get("box")
+                size = max(24, int(float(slot.get("size", 0.08)) * min(w, h)))
+                cx = x + float(slot.get("x", 0.5)) * w
+                cy = y + float(slot.get("y", 0.5)) * h
 
-            if home and box and len(box) == 4:
-                hx, hy, hw, hh = ac.zone_rect(home, cell)
-                crop = (int(hx + box[0] * hw), int(hy + box[1] * hh),
-                        int(hx + (box[0] + box[2]) * hw), int(hy + (box[1] + box[3]) * hh))
-                # Last line of defence. anchor.py is where these get fixed; by the time the
-                # stitcher sees them it can only complain.
-                cw, chh = crop[2] - crop[0], crop[3] - crop[1]
-                if chh > 0 and abs(cw / float(chh) - 1.0) > 0.05:
-                    msg = (f"avatar {name} in {z['id']}: portrait.box is {cw}x{chh}px, not "
-                           f"square — the face is being squashed. Fix the box and re-run "
-                           f"anchor.py")
-                    report["warnings"].append(msg)
-                    report["avatars"].setdefault("distorted", []).append(
-                        {"character": name, "zone": z["id"], "crop": [cw, chh]})
-                if cw and size > min(cw, chh) * 1.05:
-                    report["warnings"].append(
-                        f"avatar {name} in {z['id']}: drawn at {size}px from a "
-                        f"{min(cw, chh)}px crop — upscaled, it will look soft")
-                sub = canvas.crop(crop).resize((size, size), Image.LANCZOS)
-                mask = Image.new("L", (size * 4, size * 4), 0)
-                ImageDraw.Draw(mask).ellipse((0, 0, size * 4 - 1, size * 4 - 1), fill=255)
-                mask = mask.resize((size, size), Image.LANCZOS)
-                draw.ellipse([cx - size / 2 - 3, cy - size / 2 - 3,
-                              cx + size / 2 + 3, cy + size / 2 + 3], fill=ink + (200,))
-                canvas.paste(sub, (int(cx - size / 2), int(cy - size / 2)), mask)
-                report["avatars"]["cropped"].append({"character": name, "zone": z["id"],
-                                                     "source": port.get("zone") or ch.get("home_zone")})
-            else:
-                # No portrait to crop. Draw a map node, not an empty ring: a hollow circle
-                # at avatar size reads as a portrait that failed to load, which invites
-                # "why is this person missing" instead of "this is a secondary character".
-                r = size * 0.26
-                draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=ink + (40,),
-                             outline=ink + (185,), width=max(2, int(size * 0.022)))
-                dot = r * 0.34
-                draw.ellipse([cx - dot, cy - dot, cx + dot, cy + dot], fill=accent + (235,))
-                report["avatars"]["symbol"].append({"character": name, "zone": z["id"],
-                                                    "reason": "no portrait.box on home character"})
+                if home and box and len(box) == 4:
+                    hx, hy, hw, hh = ac.zone_rect(home, cell)
+                    crop = (int(hx + box[0] * hw), int(hy + box[1] * hh),
+                            int(hx + (box[0] + box[2]) * hw), int(hy + (box[1] + box[3]) * hh))
+                    # Last line of defence. anchor.py is where these get fixed; by the time the
+                    # stitcher sees them it can only complain.
+                    cw, chh = crop[2] - crop[0], crop[3] - crop[1]
+                    if chh > 0 and abs(cw / float(chh) - 1.0) > 0.05:
+                        msg = (f"avatar {name} in {z['id']}: portrait.box is {cw}x{chh}px, not "
+                               f"square — the face is being squashed. Fix the box and re-run "
+                               f"anchor.py")
+                        report["warnings"].append(msg)
+                        report["avatars"].setdefault("distorted", []).append(
+                            {"character": name, "zone": z["id"], "crop": [cw, chh]})
+                    if cw and size > min(cw, chh) * 1.05:
+                        report["warnings"].append(
+                            f"avatar {name} in {z['id']}: drawn at {size}px from a "
+                            f"{min(cw, chh)}px crop — upscaled, it will look soft")
+                    sub = canvas.crop(crop).resize((size, size), Image.LANCZOS)
+                    mask = Image.new("L", (size * 4, size * 4), 0)
+                    ImageDraw.Draw(mask).ellipse((0, 0, size * 4 - 1, size * 4 - 1), fill=255)
+                    mask = mask.resize((size, size), Image.LANCZOS)
+                    draw.ellipse([cx - size / 2 - 3, cy - size / 2 - 3,
+                                  cx + size / 2 + 3, cy + size / 2 + 3], fill=ink + (200,))
+                    canvas.paste(sub, (int(cx - size / 2), int(cy - size / 2)), mask)
+                    report["avatars"]["cropped"].append({"character": name, "zone": z["id"],
+                                                         "source": port.get("zone") or ch.get("home_zone")})
+                else:
+                    # No portrait to crop. Draw a map node, not an empty ring: a hollow circle
+                    # at avatar size reads as a portrait that failed to load, which invites
+                    # "why is this person missing" instead of "this is a secondary character".
+                    r = size * 0.26
+                    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=ink + (40,),
+                                 outline=ink + (185,), width=max(2, int(size * 0.022)))
+                    dot = r * 0.34
+                    draw.ellipse([cx - dot, cy - dot, cx + dot, cy + dot], fill=accent + (235,))
+                    report["avatars"]["symbol"].append({"character": name, "zone": z["id"],
+                                                        "reason": "no portrait.box on home character"})
 
     # ---------------------------------------------------------------- pass 6: labels
     # The cartouche is painted last, on top of every label. Work out its footprint now so
@@ -412,10 +434,7 @@ def main():
     # definition of where that plate lands, so Gate 2 reserves the same rectangle the
     # stitcher fills — the previous header was drawn by skeleton.py from its own numbers,
     # and the two disagreed often enough to approve a layout the final image then broke.
-    for z in bp["zones"]:
-        cap = ac.zone_caption_geometry(bp, z, cell, draw, avoid=cart_rect)
-        if not cap:
-            continue
+    def paint_caption(z, cap):
         if cap.get("flipped"):
             report["warnings"].append(
                 f"zone {z['id']}: caption sits at the top — its bottom-left corner is under "
@@ -432,18 +451,42 @@ def main():
                 draw.text((x0 + cap["pad"], ty), text, font=font, fill=ac.PLATE_INK)
             report["contrast"]["checked"] += 1
         else:
-            zx, zy, zw, zh = ac.zone_rect(z, cell)
-            if not z.get("hide_name") and z.get("name"):
-                place(str(z.get("name", "")), zx + zw * 0.026, zy + zh * 0.020,
+            zx, zy, zw, zh = cap.get("frame") or ac.zone_rect(z, cell)
+            if not z.get("hide_name") and cap["lines"]:
+                name_line = cap["lines"][0]
+                place(name_line[0], zx + zw * 0.026, zy + zh * 0.020,
                       62 * cell / 2048.0, z["id"], anchor="lt", tonal=z.get("tonal"))
-            if z.get("caption"):
-                place(str(z["caption"]), zx + zw * 0.028, zy + zh * 0.074,
+            if len(cap["lines"]) > 1:
+                place(cap["lines"][1][0], zx + zw * 0.028, zy + zh * 0.074,
                       30 * cell / 2048.0, z["id"], anchor="lt", tonal=z.get("tonal"))
 
     for z in bp["zones"]:
+        if ac.split_of(z):
+            # Two scenes, two plates: each sits at the corner of its half farthest from the
+            # seam, which is where the composition leaves its negative space.
+            for cap in ac.split_caption_geometries(bp, z, cell, draw, avoid=cart_rect):
+                paint_caption(z, cap)
+            continue
+        cap = ac.zone_caption_geometry(bp, z, cell, draw, avoid=cart_rect)
+        if cap:
+            paint_caption(z, cap)
+
+    for z in bp["zones"]:
         x, y, w, h = ac.zone_rect(z, cell)
+        sgeo = splits.get(z["id"])
         for lb in z.get("labels", []) or []:
-            place(str(lb.get("text", "")),
+            text = str(lb.get("text", ""))
+            if sgeo:
+                probe = ac.text_box(draw, text,
+                                    x + float(lb.get("x", 0.5)) * w,
+                                    y + float(lb.get("y", 0.5)) * h,
+                                    float(lb.get("size", 40)) * cell / 2048.0,
+                                    lb.get("anchor", "cb"))["box"]
+                if ac.box_on_seam(sgeo, probe):
+                    report["warnings"].append(
+                        f"zone {z['id']}: label 「{text[:14]}」 straddles the split seam — "
+                        f"it reads as belonging to both scenes. Move it into one half")
+            place(text,
                   x + float(lb.get("x", 0.5)) * w,
                   y + float(lb.get("y", 0.5)) * h,
                   float(lb.get("size", 40)) * cell / 2048.0,
@@ -468,13 +511,19 @@ def main():
             zrect = ac.zone_rect(z, cell) if z else (0, 0, W, H)
             avoid = [cart_rect] if cart_rect else []
             if z:
-                cg = ac.zone_caption_geometry(bp, z, cell, draw, avoid=cart_rect)
-                if cg:
-                    avoid.append(cg["rect"])
+                if ac.split_of(z):
+                    avoid.extend(c["rect"] for c in
+                                 ac.split_caption_geometries(bp, z, cell, draw,
+                                                             avoid=cart_rect))
+                else:
+                    cg = ac.zone_caption_geometry(bp, z, cell, draw, avoid=cart_rect)
+                    if cg:
+                        avoid.append(cg["rect"])
             lx, ly, anchor = ac.event_label_pos(draw, str(e.get("label", "")), ex, ey,
                                                 cell, zrect, avoid,
                                                 [b[:4] for b in placed_boxes],
-                                                e.get("label_side", "below"))
+                                                e.get("label_side", "below"),
+                                                split=splits.get(e.get("zone")))
             place(str(e.get("label", "")), lx, ly, efont, e.get("zone"), anchor=anchor,
                   tonal=(z or {}).get("tonal"))
 
